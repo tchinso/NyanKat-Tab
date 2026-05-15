@@ -1,0 +1,74 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+body {
+  background: Canvas;
+  color: CanvasText;
+  margin: 0;
+  min-width: 310px;
+}
+
+header {
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+}
+
+h1,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+p,
+small,
+footer {
+  color: color-mix(in srgb, CanvasText 70%, transparent);
+  font-size: 12px;
+}
+
+main {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.toggle-row {
+  align-items: center;
+  border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.toggle-row span {
+  display: grid;
+  gap: 4px;
+}
+
+strong {
+  font-size: 13px;
+}
+
+input[type="checkbox"] {
+  accent-color: #0f8b8d;
+  flex: 0 0 auto;
+  height: 20px;
+  width: 20px;
+}
+
+footer {
+  border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  min-height: 18px;
+  padding: 10px 14px 12px;
+}

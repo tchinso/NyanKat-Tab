@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "NyanKatX3 Tab",
+  "version": "1.0.1",
+  "description": "New tab redirect for fav.ju.mp, fallback navigation, YouTube start helper, and downward-only wheel filtering.",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "NyanKatX3 Tab",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "webNavigation"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "youtube-zero.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "wheel-down-only.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

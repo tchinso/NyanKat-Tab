@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NyanKatX3 Tab 설정</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header>
+      <img src="icon48.png" alt="" width="32" height="32">
+      <div>
+        <h1>NyanKatX3 Tab</h1>
+        <p>설정</p>
+      </div>
+    </header>
+
+    <main>
+      <label class="toggle-row" for="sendZeroOnYouTube">
+        <span>
+          <strong>YouTube 0 입력</strong>
+          <small>watch 페이지 로드 후 영상을 처음으로 보냅니다.</small>
+        </span>
+        <input id="sendZeroOnYouTube" type="checkbox">
+      </label>
+
+      <label class="toggle-row" for="blockUpwardWheel">
+        <span>
+          <strong>위 스크롤 무시</strong>
+          <small>마우스 휠의 위 방향 입력을 막습니다.</small>
+        </span>
+        <input id="blockUpwardWheel" type="checkbox">
+      </label>
+    </main>
+
+    <footer id="status" aria-live="polite">저장됨</footer>
+    <script src="popup.js"></script>
+  </body>
+</html>
