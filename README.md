@@ -1,3 +1,10 @@
+
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/ecnmaciilbmjkhakjnhbfbijffgdmoib">
+    <img src="https://img.shields.io/badge/🚀_Install_Chrome_Extension-Chrome_Web_Store-4285F4?style=for-the-badge" />
+  </a>
+</p>
+
 # NyanKatX3 Tab
 
 Chrome MV3 extension for:
