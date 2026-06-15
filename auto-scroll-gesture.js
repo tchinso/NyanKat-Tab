@@ -7,7 +7,7 @@ const AUTO_SCROLL_DEFAULT_SETTINGS = {
 
 const AUTO_SCROLL_MODES = new Set(["off", "down", "both"]);
 const AUTO_SCROLL_MIN_SPEED = 0.25;
-const AUTO_SCROLL_MAX_SPEED = 4;
+const AUTO_SCROLL_MAX_SPEED = 6;
 const AUTO_SCROLL_SPEED_STEP = 0.25;
 const GESTURE_MIN_VERTICAL_DISTANCE = 72;
 const GESTURE_VERTICAL_RATIO = 1.5;
@@ -19,6 +19,7 @@ let pendingGesture = null;
 let suppressNextContextMenu = false;
 let scrollFrame = 0;
 let scrollDirection = 0;
+let scrollAccumulator = 0;
 
 function normalizeAutoScrollMode(value) {
   return AUTO_SCROLL_MODES.has(value) ? value : AUTO_SCROLL_DEFAULT_SETTINGS.mouseGestureAutoScrollMode;
@@ -106,6 +107,7 @@ function stopAutoScroll() {
   }
 
   scrollDirection = 0;
+  scrollAccumulator = 0;
 }
 
 function startAutoScroll(direction) {
@@ -118,9 +120,19 @@ function startAutoScroll(direction) {
       return;
     }
 
-    const beforeScrollTop = getScrollTop();
-    window.scrollBy(0, scrollDirection * autoScrollSpeed);
+    scrollAccumulator += scrollDirection * autoScrollSpeed;
+    const scrollAmount =
+      scrollAccumulator > 0 ? Math.floor(scrollAccumulator) : Math.ceil(scrollAccumulator);
 
+    if (scrollAmount === 0) {
+      scrollFrame = window.requestAnimationFrame(tick);
+      return;
+    }
+
+    scrollAccumulator -= scrollAmount;
+
+    const beforeScrollTop = getScrollTop();
+    window.scrollBy(0, scrollAmount);
     if (getScrollTop() === beforeScrollTop) {
       stopAutoScroll();
       return;

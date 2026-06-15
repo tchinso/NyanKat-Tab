@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS = {
 
 const AUTO_SCROLL_MODES = new Set(["off", "down", "both"]);
 const AUTO_SCROLL_MIN_SPEED = 0.25;
-const AUTO_SCROLL_MAX_SPEED = 4;
+const AUTO_SCROLL_MAX_SPEED = 6;
 const AUTO_SCROLL_SPEED_STEP = 0.25;
 
 const checkboxControls = {
