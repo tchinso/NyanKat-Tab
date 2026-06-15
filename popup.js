@@ -7,6 +7,9 @@ const DEFAULT_SETTINGS = {
 };
 
 const AUTO_SCROLL_MODES = new Set(["off", "down", "both"]);
+const AUTO_SCROLL_MIN_SPEED = 0.25;
+const AUTO_SCROLL_MAX_SPEED = 4;
+const AUTO_SCROLL_SPEED_STEP = 0.25;
 
 const checkboxControls = {
   sendZeroOnYouTube: document.querySelector("#sendZeroOnYouTube")
@@ -31,7 +34,9 @@ function normalizeAutoScrollSpeed(value) {
     return DEFAULT_SETTINGS.autoScrollSpeed;
   }
 
-  return Math.min(12, Math.max(1, Math.round(numericValue)));
+  const steppedValue = Math.round(numericValue / AUTO_SCROLL_SPEED_STEP) * AUTO_SCROLL_SPEED_STEP;
+  const clampedValue = Math.min(AUTO_SCROLL_MAX_SPEED, Math.max(AUTO_SCROLL_MIN_SPEED, steppedValue));
+  return Number(clampedValue.toFixed(2));
 }
 
 function updateAutoScrollSpeedValue(value) {

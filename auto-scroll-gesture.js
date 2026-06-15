@@ -6,8 +6,9 @@ const AUTO_SCROLL_DEFAULT_SETTINGS = {
 };
 
 const AUTO_SCROLL_MODES = new Set(["off", "down", "both"]);
-const AUTO_SCROLL_MIN_SPEED = 1;
-const AUTO_SCROLL_MAX_SPEED = 12;
+const AUTO_SCROLL_MIN_SPEED = 0.25;
+const AUTO_SCROLL_MAX_SPEED = 4;
+const AUTO_SCROLL_SPEED_STEP = 0.25;
 const GESTURE_MIN_VERTICAL_DISTANCE = 72;
 const GESTURE_VERTICAL_RATIO = 1.5;
 const RIGHT_MOUSE_BUTTON = 2;
@@ -29,7 +30,9 @@ function normalizeAutoScrollSpeed(value) {
     return AUTO_SCROLL_DEFAULT_SETTINGS.autoScrollSpeed;
   }
 
-  return Math.min(AUTO_SCROLL_MAX_SPEED, Math.max(AUTO_SCROLL_MIN_SPEED, Math.round(numericValue)));
+  const steppedValue = Math.round(numericValue / AUTO_SCROLL_SPEED_STEP) * AUTO_SCROLL_SPEED_STEP;
+  const clampedValue = Math.min(AUTO_SCROLL_MAX_SPEED, Math.max(AUTO_SCROLL_MIN_SPEED, steppedValue));
+  return Number(clampedValue.toFixed(2));
 }
 
 function applyAutoScrollSettings(settings) {
