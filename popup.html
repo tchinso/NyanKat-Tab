@@ -24,12 +24,24 @@
         <input id="sendZeroOnYouTube" type="checkbox">
       </label>
 
-      <label class="toggle-row" for="blockUpwardWheel">
+      <label class="field-row" for="mouseGestureAutoScrollMode">
         <span>
-          <strong>위 스크롤 무시</strong>
-          <small>마우스 휠의 위 방향 입력을 막습니다.</small>
+          <strong>마우스 제스처 자동 스크롤</strong>
+          <small>오른쪽 버튼 세로 드래그로 자동 스크롤을 시작합니다.</small>
         </span>
-        <input id="blockUpwardWheel" type="checkbox">
+        <select id="mouseGestureAutoScrollMode">
+          <option value="off">사용 안함</option>
+          <option value="down">아래로만</option>
+          <option value="both">위/아래 모두</option>
+        </select>
+      </label>
+
+      <label class="field-row" for="autoScrollSpeed">
+        <span>
+          <strong>자동 스크롤 속도</strong>
+          <small>현재 속도 <output id="autoScrollSpeedValue" for="autoScrollSpeed">2</output></small>
+        </span>
+        <input id="autoScrollSpeed" type="range" min="1" max="12" step="1">
       </label>
     </main>
 

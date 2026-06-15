@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "NyanKatX3 Tab",
-  "version": "1.0.1",
-  "description": "New tab redirect for fav.ju.mp, fallback navigation, YouTube start helper, and downward-only wheel filtering.",
+  "version": "1.0.3",
+  "description": "New tab redirect, fallback navigation, YouTube start helper, selected-text Base64 decoding, and mouse-gesture auto scrolling.",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
@@ -24,6 +24,7 @@
     "service_worker": "background.js"
   },
   "permissions": [
+    "contextMenus",
     "storage",
     "webNavigation"
   ],
@@ -43,7 +44,8 @@
         "https://*/*"
       ],
       "js": [
-        "wheel-down-only.js"
+        "selection-tools.js",
+        "auto-scroll-gesture.js"
       ],
       "run_at": "document_start",
       "all_frames": true

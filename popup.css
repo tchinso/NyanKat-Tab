@@ -7,7 +7,7 @@ body {
   background: Canvas;
   color: CanvasText;
   margin: 0;
-  min-width: 310px;
+  min-width: 340px;
 }
 
 header {
@@ -41,7 +41,8 @@ main {
   padding: 12px;
 }
 
-.toggle-row {
+.toggle-row,
+.field-row {
   align-items: center;
   border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
   border-radius: 8px;
@@ -51,9 +52,11 @@ main {
   padding: 12px;
 }
 
-.toggle-row span {
+.toggle-row span,
+.field-row span {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 strong {
@@ -65,6 +68,29 @@ input[type="checkbox"] {
   flex: 0 0 auto;
   height: 20px;
   width: 20px;
+}
+
+select {
+  background: Canvas;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 6px;
+  color: CanvasText;
+  flex: 0 0 118px;
+  font: inherit;
+  font-size: 12px;
+  min-height: 32px;
+  padding: 4px 8px;
+}
+
+input[type="range"] {
+  accent-color: #0f8b8d;
+  flex: 0 0 118px;
+  width: 118px;
+}
+
+output {
+  color: CanvasText;
+  font-weight: 700;
 }
 
 footer {
