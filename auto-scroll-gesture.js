@@ -6,9 +6,10 @@ const AUTO_SCROLL_DEFAULT_SETTINGS = {
 };
 
 const AUTO_SCROLL_MODES = new Set(["off", "down", "both"]);
-const AUTO_SCROLL_MIN_SPEED = 0.25;
-const AUTO_SCROLL_MAX_SPEED = 6;
-const AUTO_SCROLL_SPEED_STEP = 0.25;
+const AUTO_SCROLL_SPEED_OPTIONS = Object.freeze([
+  0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 30, 35, 40
+]);
+const AUTO_SCROLL_UP_SPEED = 40;
 const GESTURE_MIN_VERTICAL_DISTANCE = 72;
 const GESTURE_VERTICAL_RATIO = 1.5;
 const RIGHT_MOUSE_BUTTON = 2;
@@ -31,9 +32,13 @@ function normalizeAutoScrollSpeed(value) {
     return AUTO_SCROLL_DEFAULT_SETTINGS.autoScrollSpeed;
   }
 
-  const steppedValue = Math.round(numericValue / AUTO_SCROLL_SPEED_STEP) * AUTO_SCROLL_SPEED_STEP;
-  const clampedValue = Math.min(AUTO_SCROLL_MAX_SPEED, Math.max(AUTO_SCROLL_MIN_SPEED, steppedValue));
-  return Number(clampedValue.toFixed(2));
+  return AUTO_SCROLL_SPEED_OPTIONS.reduce((closestSpeed, speed) =>
+    Math.abs(speed - numericValue) < Math.abs(closestSpeed - numericValue) ? speed : closestSpeed
+  );
+}
+
+function getAutoScrollSpeed(direction) {
+  return direction < 0 ? AUTO_SCROLL_UP_SPEED : autoScrollSpeed;
 }
 
 function applyAutoScrollSettings(settings) {
@@ -120,7 +125,7 @@ function startAutoScroll(direction) {
       return;
     }
 
-    scrollAccumulator += scrollDirection * autoScrollSpeed;
+    scrollAccumulator += scrollDirection * getAutoScrollSpeed(scrollDirection);
     const scrollAmount =
       scrollAccumulator > 0 ? Math.floor(scrollAccumulator) : Math.ceil(scrollAccumulator);
 

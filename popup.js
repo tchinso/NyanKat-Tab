@@ -7,9 +7,9 @@ const DEFAULT_SETTINGS = {
 };
 
 const AUTO_SCROLL_MODES = new Set(["off", "down", "both"]);
-const AUTO_SCROLL_MIN_SPEED = 0.25;
-const AUTO_SCROLL_MAX_SPEED = 6;
-const AUTO_SCROLL_SPEED_STEP = 0.25;
+const AUTO_SCROLL_SPEED_OPTIONS = Object.freeze([
+  0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 30, 35, 40
+]);
 
 const checkboxControls = {
   sendZeroOnYouTube: document.querySelector("#sendZeroOnYouTube")
@@ -34,13 +34,22 @@ function normalizeAutoScrollSpeed(value) {
     return DEFAULT_SETTINGS.autoScrollSpeed;
   }
 
-  const steppedValue = Math.round(numericValue / AUTO_SCROLL_SPEED_STEP) * AUTO_SCROLL_SPEED_STEP;
-  const clampedValue = Math.min(AUTO_SCROLL_MAX_SPEED, Math.max(AUTO_SCROLL_MIN_SPEED, steppedValue));
-  return Number(clampedValue.toFixed(2));
+  return AUTO_SCROLL_SPEED_OPTIONS.reduce((closestSpeed, speed) =>
+    Math.abs(speed - numericValue) < Math.abs(closestSpeed - numericValue) ? speed : closestSpeed
+  );
 }
 
 function updateAutoScrollSpeedValue(value) {
   autoScrollSpeedValue.textContent = String(normalizeAutoScrollSpeed(value));
+}
+
+function populateAutoScrollSpeedOptions() {
+  for (const speed of AUTO_SCROLL_SPEED_OPTIONS) {
+    const option = document.createElement("option");
+    option.value = String(speed);
+    option.textContent = String(speed);
+    valueControls.autoScrollSpeed.append(option);
+  }
 }
 
 function setStatus(text) {
@@ -56,6 +65,8 @@ function saveSetting(key, value) {
     setStatus(chrome.runtime.lastError ? "저장 실패" : "저장됨");
   });
 }
+
+populateAutoScrollSpeedOptions();
 
 chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
   for (const [key, control] of Object.entries(checkboxControls)) {
