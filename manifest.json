@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "NyanKatX3 Tab",
-  "version": "1.0.4",
-  "description": "New tab redirect, fallback navigation, YouTube start helper, selected-text Base64 decoding, and mouse-gesture auto scrolling.",
+  "version": "1.0.6",
+  "description": "New tab redirect, fallback navigation, YouTube start helper, Base64 decoding, and site-specific floating auto-scroll buttons.",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
@@ -45,10 +45,24 @@
       ],
       "js": [
         "selection-tools.js",
-        "auto-scroll-gesture.js"
+        "floating-scroll.js"
       ],
       "run_at": "document_start",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "https://kone.gg/*",
+        "https://*.kone.gg/*"
+      ],
+      "js": [
+        "kone-base64-decoder.js"
+      ],
+      "run_at": "document_idle"
     }
-  ]
+  ],
+  "options_ui": {
+    "page": "scroll-settings.html",
+    "open_in_tab": true
+  }
 }

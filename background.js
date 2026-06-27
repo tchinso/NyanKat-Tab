@@ -2,11 +2,14 @@
 
 const DEFAULT_SETTINGS = {
   sendZeroOnYouTube: true,
-  mouseGestureAutoScrollMode: "down",
-  autoScrollSpeed: 2
+  enableKoneBase64AutoDecode: true,
+  floatingScrollSites: [
+    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 25, buttonSize: 64, position: null },
+    { host: "kone.gg", upSpeed: 40, downSpeed: 2, fastDownSpeed: 10, buttonSize: 100, position: null }
+  ]
 };
 
-const OBSOLETE_SETTINGS = ["blockUpwardWheel"];
+const OBSOLETE_SETTINGS = ["blockUpwardWheel", "mouseGestureAutoScrollMode", "autoScrollSpeed"];
 
 const CONTEXT_MENU_ROOT_ID = "nyankat-tools";
 const CONTEXT_MENU_BASE64_DECODE_ID = "nyankat-base64-decode";
@@ -49,7 +52,7 @@ function recreateContextMenus() {
     chrome.contextMenus.create({
       id: CONTEXT_MENU_BASE64_DECODE_ID,
       parentId: CONTEXT_MENU_ROOT_ID,
-      title: "Base64 해독",
+      title: "Base64 디코딩",
       contexts: ["selection"],
       documentUrlPatterns: WEB_DOCUMENT_PATTERNS
     });

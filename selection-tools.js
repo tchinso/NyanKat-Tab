@@ -8,9 +8,9 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 
   if (!message.ok) {
-    window.alert("NyanKatX3 Tab: 선택한 텍스트를 Base64로 해독할 수 없습니다.");
+    window.alert("NyanKatX3 Tab: 선택한 텍스트를 Base64로 디코딩할 수 없습니다.");
     return;
   }
 
-  window.prompt(`NyanKatX3 Tab Base64 해독 결과 (${message.rounds}회)`, message.text);
+  window.prompt(`NyanKatX3 Tab Base64 디코딩 결과 (${message.rounds}차)`, message.text);
 });

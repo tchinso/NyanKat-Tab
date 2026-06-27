@@ -7,15 +7,14 @@ body {
   background: Canvas;
   color: CanvasText;
   margin: 0;
-  min-width: 340px;
 }
 
 header {
   align-items: center;
   border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
   display: flex;
-  gap: 12px;
-  padding: 14px;
+  gap: 14px;
+  padding: 18px 20px;
 }
 
 h1,
@@ -24,67 +23,80 @@ p {
 }
 
 h1 {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 20px;
 }
 
 p,
-small,
-footer {
+span,
+#status {
   color: color-mix(in srgb, CanvasText 70%, transparent);
   font-size: 12px;
 }
 
 main {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 14px;
+  margin: 0 auto;
+  max-width: 1180px;
+  padding: 18px;
 }
 
-.toggle-row,
-.field-row {
-  align-items: center;
+#siteList {
+  display: grid;
+  gap: 10px;
+}
+
+.site-row {
+  align-items: end;
   border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
   border-radius: 8px;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 1.6fr) repeat(4, minmax(94px, .8fr)) auto;
   padding: 12px;
 }
 
-.toggle-row span,
-.field-row span {
+label {
   display: grid;
-  gap: 4px;
-  min-width: 0;
+  gap: 5px;
 }
 
-strong {
-  font-size: 13px;
-}
-
-input[type="checkbox"] {
-  accent-color: #0f8b8d;
-  flex: 0 0 auto;
-  height: 20px;
-  width: 20px;
-}
-
-.link-button {
+input,
+select,
+button {
   background: Canvas;
   border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
   border-radius: 6px;
   color: CanvasText;
-  cursor: pointer;
   font: inherit;
-  font-size: 13px;
-  min-height: 36px;
-  padding: 8px 10px;
-  text-align: left;
+  min-height: 34px;
+  padding: 5px 8px;
 }
 
-footer {
-  border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
-  min-height: 18px;
-  padding: 10px 14px 12px;
+button {
+  cursor: pointer;
+}
+
+.remove {
+  color: #b91c1c;
+}
+
+.actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+#addSite {
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .site-row {
+    grid-template-columns: 1fr;
+  }
+
+  .remove {
+    justify-self: start;
+  }
 }

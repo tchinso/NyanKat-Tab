@@ -19,30 +19,22 @@
       <label class="toggle-row" for="sendZeroOnYouTube">
         <span>
           <strong>YouTube 0 입력</strong>
-          <small>watch 페이지 로드 후 영상을 처음으로 보냅니다.</small>
+          <small>watch 페이지 로드 후 영상 시작 위치를 처음으로 보냅니다.</small>
         </span>
         <input id="sendZeroOnYouTube" type="checkbox">
       </label>
 
-      <label class="field-row" for="mouseGestureAutoScrollMode">
+      <label class="toggle-row" for="enableKoneBase64AutoDecode">
         <span>
-          <strong>마우스 제스처 자동 스크롤</strong>
-          <small>오른쪽 버튼 세로 드래그로 자동 스크롤을 시작합니다.</small>
+          <strong>kone.gg Base64 자동 디코딩</strong>
+          <small>감지된 Base64를 자동으로 디코딩하고 링크/복사/원문 확인을 표시합니다.</small>
         </span>
-        <select id="mouseGestureAutoScrollMode">
-          <option value="off">사용 안함</option>
-          <option value="down">아래로만</option>
-          <option value="both">위/아래 모두</option>
-        </select>
+        <input id="enableKoneBase64AutoDecode" type="checkbox">
       </label>
 
-      <label class="field-row" for="autoScrollSpeed">
-        <span>
-          <strong>자동 스크롤 속도</strong>
-          <small>현재 속도 <output id="autoScrollSpeedValue" for="autoScrollSpeed">2</output></small>
-        </span>
-        <select id="autoScrollSpeed"></select>
-      </label>
+      <button id="openScrollSettings" class="link-button" type="button">
+        사이트별 플로팅 스크롤 버튼 설정 열기
+      </button>
     </main>
 
     <footer id="status" aria-live="polite">저장됨</footer>
