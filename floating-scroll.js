@@ -81,16 +81,25 @@ function getScrollElement() {
 
 function getScrollTop() {
   const scrollElement = getScrollElement();
-  return scrollElement ? scrollElement.scrollTop : window.scrollY;
+  return Math.max(
+    window.scrollY || window.pageYOffset || 0,
+    scrollElement ? scrollElement.scrollTop : 0,
+    document.documentElement ? document.documentElement.scrollTop : 0,
+    document.body ? document.body.scrollTop : 0
+  );
 }
 
 function getMaxScrollTop() {
   const scrollElement = getScrollElement();
-  if (!scrollElement) {
-    return 0;
-  }
+  const documentElement = document.documentElement;
+  const body = document.body;
+  const scrollHeight = Math.max(
+    scrollElement ? scrollElement.scrollHeight : 0,
+    documentElement ? documentElement.scrollHeight : 0,
+    body ? body.scrollHeight : 0
+  );
 
-  return Math.max(0, scrollElement.scrollHeight - window.innerHeight);
+  return Math.max(0, scrollHeight - window.innerHeight);
 }
 
 function isAtScrollLimit(speed) {
@@ -98,20 +107,39 @@ function isAtScrollLimit(speed) {
   return speed > 0 ? scrollTop >= getMaxScrollTop() - 1 : scrollTop <= 0;
 }
 
-function setScrollTop(scrollTop) {
-  const scrollElement = getScrollElement();
-  if (!scrollElement) {
+function scrollByAmount(scrollAmount) {
+  const beforeScrollTop = getScrollTop();
+  window.scrollBy(0, scrollAmount);
+
+  if (getScrollTop() !== beforeScrollTop) {
+    return true;
+  }
+
+  const scrollElements = [getScrollElement(), document.documentElement, document.body].filter(
+    (element, index, elements) => element && elements.indexOf(element) === index
+  );
+  if (scrollElements.length === 0) {
     return false;
   }
 
-  const beforeScrollTop = scrollElement.scrollTop;
-  const nextScrollTop = clampNumber(scrollTop, 0, getMaxScrollTop(), beforeScrollTop);
+  const nextScrollTop = clampNumber(
+    beforeScrollTop + scrollAmount,
+    0,
+    getMaxScrollTop(),
+    beforeScrollTop
+  );
   if (nextScrollTop === beforeScrollTop) {
     return false;
   }
 
-  scrollElement.scrollTop = nextScrollTop;
-  return scrollElement.scrollTop !== beforeScrollTop;
+  for (const scrollElement of scrollElements) {
+    scrollElement.scrollTop = nextScrollTop;
+    if (getScrollTop() !== beforeScrollTop) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function stopAutoScroll() {
@@ -143,7 +171,7 @@ function startAutoScroll(speed) {
     }
 
     scrollAccumulator -= scrollAmount;
-    if (!setScrollTop(getScrollTop() + scrollAmount)) {
+    if (!scrollByAmount(scrollAmount)) {
       stopAutoScroll();
       return;
     }
