@@ -17,7 +17,7 @@ Chrome MV3 extension for:
 - `webNavigation`: detects failed top-level navigations to the primary and first fallback URLs.
 - `content_scripts.matches` for `https://www.youtube.com/*`: runs the YouTube watch-page helper.
 - `content_scripts.matches` for `https://kone.gg/*` and `https://*.kone.gg/*`: runs the automatic Base64 decoder only on kone.gg pages.
-- `content_scripts.matches` for `http://*/*` and `https://*/*`: displays the local Base64 decode result and shows floating auto-scroll buttons only on configured hosts.
+- `content_scripts.matches` for `http://*/*` and `https://*/*`: displays the local Base64 decode result in any selected frame and shows top-frame floating auto-scroll buttons only on configured hosts.
 
 No `tabs`, `scripting`, `activeTab`, `clipboardWrite`, `notifications`, `webRequest`, or remote-code permissions are requested. Base64 decoding runs locally and does not transmit selected text or page text.
 

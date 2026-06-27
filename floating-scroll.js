@@ -10,6 +10,7 @@ const FLOATING_SCROLL_DEFAULT_SETTINGS = {
 const FLOATING_SCROLL_MIN_SIZE = 20;
 const FLOATING_SCROLL_MAX_SIZE = 140;
 const FLOATING_SCROLL_STORAGE_KEY = "floatingScrollSites";
+const FLOATING_SCROLL_CLICK_COOLDOWN_MS = 800;
 
 let siteSetting = null;
 let container = null;
@@ -18,6 +19,7 @@ let scrollSpeed = 0;
 let scrollAccumulator = 0;
 let dragState = null;
 let suppressNextButtonClick = false;
+let nextButtonScrollStartAt = 0;
 
 function normalizeHost(value) {
   return String(value || "")
@@ -96,6 +98,22 @@ function isAtScrollLimit(speed) {
   return speed > 0 ? scrollTop >= getMaxScrollTop() - 1 : scrollTop <= 0;
 }
 
+function setScrollTop(scrollTop) {
+  const scrollElement = getScrollElement();
+  if (!scrollElement) {
+    return false;
+  }
+
+  const beforeScrollTop = scrollElement.scrollTop;
+  const nextScrollTop = clampNumber(scrollTop, 0, getMaxScrollTop(), beforeScrollTop);
+  if (nextScrollTop === beforeScrollTop) {
+    return false;
+  }
+
+  scrollElement.scrollTop = nextScrollTop;
+  return scrollElement.scrollTop !== beforeScrollTop;
+}
+
 function stopAutoScroll() {
   if (scrollFrame) {
     window.cancelAnimationFrame(scrollFrame);
@@ -125,10 +143,7 @@ function startAutoScroll(speed) {
     }
 
     scrollAccumulator -= scrollAmount;
-    const beforeScrollTop = getScrollTop();
-    window.scrollBy(0, scrollAmount);
-
-    if (getScrollTop() === beforeScrollTop) {
+    if (!setScrollTop(getScrollTop() + scrollAmount)) {
       stopAutoScroll();
       return;
     }
@@ -206,6 +221,13 @@ function createButton(label, title, speed) {
 
     event.preventDefault();
     event.stopPropagation();
+
+    const now = Date.now();
+    if (now < nextButtonScrollStartAt) {
+      return;
+    }
+
+    nextButtonScrollStartAt = now + FLOATING_SCROLL_CLICK_COOLDOWN_MS;
     startAutoScroll(speed);
   });
 
@@ -253,8 +275,11 @@ function handlePointerUp(event) {
 
   if (container) {
     container.releasePointerCapture(event.pointerId);
-    const rect = container.getBoundingClientRect();
-    savePosition(rect.left, rect.top);
+
+    if (currentDrag.wasDragging) {
+      const rect = container.getBoundingClientRect();
+      savePosition(rect.left, rect.top);
+    }
   }
 
   suppressNextButtonClick = currentDrag.wasDragging;
@@ -269,6 +294,8 @@ function removeContainer() {
     container.remove();
     container = null;
   }
+
+  nextButtonScrollStartAt = 0;
 }
 
 function renderContainer() {
