@@ -4,18 +4,29 @@ const DEFAULT_SETTINGS = {
   sendZeroOnYouTube: true,
   enableKoneBase64AutoDecode: true,
   floatingScrollSites: [
-    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 25, buttonSize: 64, position: null },
-    { host: "kone.gg", upSpeed: 40, downSpeed: 2, fastDownSpeed: 10, buttonSize: 100, position: null }
-  ]
+    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 25, buttonSize: 64, placement: "middle-right" },
+    { host: "kone.gg", upSpeed: 40, downSpeed: 2, fastDownSpeed: 10, buttonSize: 100, placement: "middle-right" }
+  ],
+  floatingScrollDefault: {
+    enabled: false,
+    upSpeed: 40,
+    downSpeed: 1.5,
+    fastDownSpeed: 20,
+    buttonSize: 64,
+    placement: "middle-right"
+  },
+  floatingScrollDisabledSites: []
 };
 
 const OBSOLETE_SETTINGS = ["blockUpwardWheel", "mouseGestureAutoScrollMode", "autoScrollSpeed"];
 
 const CONTEXT_MENU_ROOT_ID = "nyankat-tools";
 const CONTEXT_MENU_BASE64_DECODE_ID = "nyankat-base64-decode";
+const CONTEXT_MENU_DISABLE_SCROLL_SITE_ID = "nyankat-disable-scroll-site";
 const BASE64_RESULT_MESSAGE_TYPE = "nyankat-base64-decode-result";
 const BASE64_MAX_DECODE_DEPTH = 3;
 const WEB_DOCUMENT_PATTERNS = ["http://*/*", "https://*/*"];
+const PAGE_CONTEXTS = ["page", "frame", "link", "image", "video", "audio"];
 
 const FALLBACK_BY_HOST = {
   "fav.ju.mp": "https://12tw.pages.dev/",
@@ -25,7 +36,7 @@ const FALLBACK_BY_HOST = {
 function ensureDefaultSettings() {
   chrome.storage.sync.remove(OBSOLETE_SETTINGS);
 
-  chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
+  chrome.storage.sync.get(Object.keys(DEFAULT_SETTINGS), (settings) => {
     const missingSettings = {};
 
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
@@ -45,7 +56,7 @@ function recreateContextMenus() {
     chrome.contextMenus.create({
       id: CONTEXT_MENU_ROOT_ID,
       title: "NyanKatX3 Tab",
-      contexts: ["selection"],
+      contexts: [...PAGE_CONTEXTS, "selection"],
       documentUrlPatterns: WEB_DOCUMENT_PATTERNS
     });
 
@@ -55,6 +66,52 @@ function recreateContextMenus() {
       title: "Base64 디코딩",
       contexts: ["selection"],
       documentUrlPatterns: WEB_DOCUMENT_PATTERNS
+    });
+
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_DISABLE_SCROLL_SITE_ID,
+      parentId: CONTEXT_MENU_ROOT_ID,
+      title: "이 사이트를 스크롤 버튼 미사용 목록에 추가",
+      contexts: PAGE_CONTEXTS,
+      documentUrlPatterns: WEB_DOCUMENT_PATTERNS
+    });
+  });
+}
+
+function normalizeHost(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .replace(/^\*\./, "")
+    .toLowerCase();
+}
+
+function getHostFromUrl(url) {
+  try {
+    return normalizeHost(new URL(url).hostname);
+  } catch {
+    return "";
+  }
+}
+
+function addFloatingScrollDisabledSite(host) {
+  const normalizedHost = normalizeHost(host);
+  if (!normalizedHost) {
+    return;
+  }
+
+  chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
+    const sites = Array.isArray(settings.floatingScrollDisabledSites)
+      ? settings.floatingScrollDisabledSites.map(normalizeHost).filter(Boolean)
+      : [];
+
+    if (sites.includes(normalizedHost)) {
+      return;
+    }
+
+    chrome.storage.sync.set({
+      floatingScrollDisabledSites: [...sites, normalizedHost].sort()
     });
   });
 }
@@ -141,6 +198,11 @@ chrome.runtime.onInstalled.addListener(handleInstalled);
 chrome.runtime.onStartup.addListener(ensureDefaultSettings);
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === CONTEXT_MENU_DISABLE_SCROLL_SITE_ID) {
+    addFloatingScrollDisabledSite(getHostFromUrl(info.pageUrl || (tab && tab.url) || ""));
+    return;
+  }
+
   if (info.menuItemId !== CONTEXT_MENU_BASE64_DECODE_ID || !tab || typeof tab.id !== "number") {
     return;
   }

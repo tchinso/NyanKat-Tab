@@ -1,15 +1,57 @@
 "use strict";
 
+const FLOATING_SCROLL_DEFAULT_PLACEMENT = "middle-right";
+const FLOATING_SCROLL_PLACEMENTS = new Set([
+  "top-left",
+  "top-center",
+  "top-right",
+  "middle-left",
+  "middle-right",
+  "bottom-left",
+  "bottom-center",
+  "bottom-right"
+]);
+const FLOATING_SCROLL_HORIZONTAL_PLACEMENTS = new Set([
+  "top-left",
+  "top-center",
+  "top-right",
+  "bottom-left",
+  "bottom-center",
+  "bottom-right"
+]);
+
 const FLOATING_SCROLL_DEFAULT_SETTINGS = {
   floatingScrollSites: [
-    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 25, buttonSize: 64, position: null },
-    { host: "kone.gg", upSpeed: 40, downSpeed: 2, fastDownSpeed: 10, buttonSize: 100, position: null }
-  ]
+    {
+      host: "dcinside.com",
+      upSpeed: 40,
+      downSpeed: 1.5,
+      fastDownSpeed: 25,
+      buttonSize: 64,
+      placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
+    },
+    {
+      host: "kone.gg",
+      upSpeed: 40,
+      downSpeed: 2,
+      fastDownSpeed: 10,
+      buttonSize: 100,
+      placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
+    }
+  ],
+  floatingScrollDefault: {
+    enabled: false,
+    upSpeed: 40,
+    downSpeed: 1.5,
+    fastDownSpeed: 20,
+    buttonSize: 64,
+    placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
+  },
+  floatingScrollDisabledSites: []
 };
 
 const FLOATING_SCROLL_MIN_SIZE = 20;
 const FLOATING_SCROLL_MAX_SIZE = 140;
-const FLOATING_SCROLL_STORAGE_KEY = "floatingScrollSites";
 const FLOATING_SCROLL_CLICK_COOLDOWN_MS = 800;
 
 let siteSetting = null;
@@ -19,8 +61,6 @@ let scrollSpeed = 0;
 let scrollAccumulator = 0;
 let scrollTarget = null;
 let lastScrollableElement = null;
-let dragState = null;
-let suppressNextButtonClick = false;
 let nextButtonScrollStartAt = 0;
 
 function normalizeHost(value) {
@@ -41,18 +81,15 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, numberValue));
 }
 
+function normalizePlacement(value) {
+  return FLOATING_SCROLL_PLACEMENTS.has(value) ? value : FLOATING_SCROLL_DEFAULT_PLACEMENT;
+}
+
 function normalizeSiteSetting(value) {
   const host = normalizeHost(value && value.host);
   if (!host) {
     return null;
   }
-
-  const position = value.position && typeof value.position === "object"
-    ? {
-        left: clampNumber(value.position.left, 0, Math.max(0, window.innerWidth - 64), 24),
-        top: clampNumber(value.position.top, 0, Math.max(0, window.innerHeight - 64), 140)
-      }
-    : null;
 
   return {
     host,
@@ -60,7 +97,23 @@ function normalizeSiteSetting(value) {
     downSpeed: clampNumber(value.downSpeed, 0.25, 80, 2),
     fastDownSpeed: clampNumber(value.fastDownSpeed, 0.25, 80, 20),
     buttonSize: clampNumber(value.buttonSize, FLOATING_SCROLL_MIN_SIZE, FLOATING_SCROLL_MAX_SIZE, 64),
-    position
+    placement: normalizePlacement(value.placement)
+  };
+}
+
+function normalizeDefaultSiteSetting(value) {
+  return {
+    enabled: Boolean(value && value.enabled),
+    upSpeed: clampNumber(value && value.upSpeed, 0.25, 80, 40),
+    downSpeed: clampNumber(value && value.downSpeed, 0.25, 80, 1.5),
+    fastDownSpeed: clampNumber(value && value.fastDownSpeed, 0.25, 80, 20),
+    buttonSize: clampNumber(
+      value && value.buttonSize,
+      FLOATING_SCROLL_MIN_SIZE,
+      FLOATING_SCROLL_MAX_SIZE,
+      64
+    ),
+    placement: normalizePlacement(value && value.placement)
   };
 }
 
@@ -72,8 +125,15 @@ function normalizeSiteSettings(values) {
   return values.map(normalizeSiteSetting).filter(Boolean);
 }
 
-function matchesCurrentHost(host) {
-  const currentHost = location.hostname.toLowerCase();
+function normalizeDisabledSites(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return Array.from(new Set(values.map(normalizeHost).filter(Boolean)));
+}
+
+function matchesHost(currentHost, host) {
   return currentHost === host || currentHost.endsWith("." + host);
 }
 
@@ -330,47 +390,35 @@ function startAutoScroll(speed) {
   scrollFrame = window.requestAnimationFrame(tick);
 }
 
-function getDefaultPosition(size) {
-  return {
-    left: Math.max(8, window.innerWidth - size - 24),
-    top: Math.max(8, Math.round((window.innerHeight - size * 3 - 18) / 2))
-  };
-}
-
-function savePosition(left, top) {
-  if (!siteSetting) {
-    return;
-  }
-
-  chrome.storage.sync.get(FLOATING_SCROLL_DEFAULT_SETTINGS, (settings) => {
-    const sites = normalizeSiteSettings(settings.floatingScrollSites);
-    const nextSites = sites.map((site) =>
-      site.host === siteSetting.host ? { ...site, position: { left, top } } : site
-    );
-    chrome.storage.sync.set({ [FLOATING_SCROLL_STORAGE_KEY]: nextSites });
-  });
-}
-
-function positionContainer(left, top) {
+function positionContainer() {
   if (!container || !siteSetting) {
     return;
   }
 
   const rect = container.getBoundingClientRect();
-  const maxLeft = Math.max(0, window.innerWidth - rect.width);
-  const maxTop = Math.max(0, window.innerHeight - rect.height);
-  container.style.left = Math.round(clampNumber(left, 0, maxLeft, 0)) + "px";
-  container.style.top = Math.round(clampNumber(top, 0, maxTop, 0)) + "px";
+  const gap = 12;
+  const maxLeft = Math.max(gap, window.innerWidth - rect.width - gap);
+  const maxTop = Math.max(gap, window.innerHeight - rect.height - gap);
+  const centerLeft = Math.round((window.innerWidth - rect.width) / 2);
+  const centerTop = Math.round((window.innerHeight - rect.height) / 2);
+
+  const positions = {
+    "top-left": { left: gap, top: gap },
+    "top-center": { left: centerLeft, top: gap },
+    "top-right": { left: maxLeft, top: gap },
+    "middle-left": { left: gap, top: centerTop },
+    "middle-right": { left: maxLeft, top: centerTop },
+    "bottom-left": { left: gap, top: maxTop },
+    "bottom-center": { left: centerLeft, top: maxTop },
+    "bottom-right": { left: maxLeft, top: maxTop }
+  };
+
+  const position = positions[siteSetting.placement] || positions[FLOATING_SCROLL_DEFAULT_PLACEMENT];
+  container.style.left = Math.round(clampNumber(position.left, gap, maxLeft, gap)) + "px";
+  container.style.top = Math.round(clampNumber(position.top, gap, maxTop, gap)) + "px";
 }
 
 function handleButtonActivation(event, speed) {
-  if (suppressNextButtonClick) {
-    suppressNextButtonClick = false;
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-
   event.preventDefault();
   event.stopPropagation();
 
@@ -423,64 +471,6 @@ function createButton(label, title, speed) {
   return button;
 }
 
-function handlePointerDown(event) {
-  if (
-    !container ||
-    event.button !== 0 ||
-    (event.target instanceof Element && event.target.closest("button"))
-  ) {
-    return;
-  }
-
-  const rect = container.getBoundingClientRect();
-  dragState = {
-    pointerId: event.pointerId,
-    offsetX: event.clientX - rect.left,
-    offsetY: event.clientY - rect.top,
-    startX: event.clientX,
-    startY: event.clientY,
-    wasDragging: false
-  };
-  container.setPointerCapture(event.pointerId);
-}
-
-function handlePointerMove(event) {
-  if (!dragState || dragState.pointerId !== event.pointerId) {
-    return;
-  }
-
-  const deltaX = Math.abs(event.clientX - dragState.startX);
-  const deltaY = Math.abs(event.clientY - dragState.startY);
-  if (deltaX > 4 || deltaY > 4) {
-    dragState.wasDragging = true;
-  }
-
-  positionContainer(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY);
-}
-
-function handlePointerUp(event) {
-  if (!dragState || dragState.pointerId !== event.pointerId) {
-    return;
-  }
-
-  const currentDrag = dragState;
-  dragState = null;
-
-  if (container) {
-    container.releasePointerCapture(event.pointerId);
-
-    if (currentDrag.wasDragging) {
-      const rect = container.getBoundingClientRect();
-      savePosition(rect.left, rect.top);
-    }
-  }
-
-  suppressNextButtonClick = currentDrag.wasDragging;
-  window.setTimeout(() => {
-    suppressNextButtonClick = false;
-  }, 0);
-}
-
 function rememberScrollableElement(event) {
   if (container && container.contains(event.target)) {
     return;
@@ -509,11 +499,15 @@ function renderContainer() {
   }
 
   removeContainer();
+  const isHorizontal = FLOATING_SCROLL_HORIZONTAL_PLACEMENTS.has(siteSetting.placement);
   container = document.createElement("div");
   container.setAttribute("data-nyankat-floating-scroll", "true");
   container.style.cssText = [
     "display:grid",
     "gap:6px",
+    "grid-auto-flow:" + (isHorizontal ? "column" : "row"),
+    "grid-template-columns:" + (isHorizontal ? "repeat(3, " + siteSetting.buttonSize + "px)" : siteSetting.buttonSize + "px"),
+    "grid-template-rows:" + (isHorizontal ? siteSetting.buttonSize + "px" : "repeat(3, " + siteSetting.buttonSize + "px)"),
     "position:fixed",
     "z-index:2147483647",
     "user-select:none",
@@ -526,19 +520,29 @@ function renderContainer() {
     createButton("⏬", "빠르게 아래로 스크롤", siteSetting.fastDownSpeed)
   );
 
-  container.addEventListener("pointerdown", handlePointerDown);
-  container.addEventListener("pointermove", handlePointerMove);
-  container.addEventListener("pointerup", handlePointerUp);
-  container.addEventListener("pointercancel", handlePointerUp);
-
   document.documentElement.append(container);
-  const position = siteSetting.position || getDefaultPosition(siteSetting.buttonSize);
-  positionContainer(position.left, position.top);
+  positionContainer();
 }
 
 function applySettings(settings) {
+  const currentHost = location.hostname.toLowerCase();
+  const disabledSites = normalizeDisabledSites(settings.floatingScrollDisabledSites);
+  if (disabledSites.some((host) => matchesHost(currentHost, host))) {
+    siteSetting = null;
+    renderContainer();
+    return;
+  }
+
   const sites = normalizeSiteSettings(settings.floatingScrollSites);
-  siteSetting = sites.find((site) => matchesCurrentHost(site.host)) || null;
+  const exactSiteSetting = sites.find((site) => matchesHost(currentHost, site.host));
+  if (exactSiteSetting) {
+    siteSetting = exactSiteSetting;
+    renderContainer();
+    return;
+  }
+
+  const defaultSiteSetting = normalizeDefaultSiteSetting(settings.floatingScrollDefault);
+  siteSetting = defaultSiteSetting.enabled ? defaultSiteSetting : null;
   renderContainer();
 }
 
@@ -547,11 +551,14 @@ function init() {
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "sync" || !changes.floatingScrollSites) {
+  if (
+    areaName !== "sync" ||
+    (!changes.floatingScrollSites && !changes.floatingScrollDefault && !changes.floatingScrollDisabledSites)
+  ) {
     return;
   }
 
-  applySettings({ floatingScrollSites: changes.floatingScrollSites.newValue });
+  chrome.storage.sync.get(FLOATING_SCROLL_DEFAULT_SETTINGS, applySettings);
 });
 
 window.addEventListener("mousedown", (event) => {
@@ -568,8 +575,7 @@ window.addEventListener("resize", () => {
     return;
   }
 
-  const rect = container.getBoundingClientRect();
-  positionContainer(rect.left, rect.top);
+  positionContainer();
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {

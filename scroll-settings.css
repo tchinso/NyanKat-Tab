@@ -18,12 +18,17 @@ header {
 }
 
 h1,
+h2,
 p {
   margin: 0;
 }
 
 h1 {
   font-size: 20px;
+}
+
+h2 {
+  font-size: 16px;
 }
 
 p,
@@ -35,30 +40,66 @@ span,
 
 main {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   margin: 0 auto;
-  max-width: 1180px;
+  max-width: 1240px;
   padding: 18px;
 }
 
-#siteList {
+.settings-section {
   display: grid;
   gap: 10px;
 }
 
-.site-row {
+#siteList,
+#disabledSiteList {
+  display: grid;
+  gap: 10px;
+}
+
+.default-row,
+.site-row,
+.disabled-site-row {
   align-items: end;
   border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(180px, 1.6fr) repeat(4, minmax(94px, .8fr)) auto;
   padding: 12px;
+}
+
+.site-row {
+  grid-template-columns: minmax(180px, 1.4fr) minmax(130px, .9fr) repeat(4, minmax(94px, .75fr)) auto;
+}
+
+.default-row {
+  grid-template-columns: minmax(220px, auto) 1fr;
+}
+
+.default-controls {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
+}
+
+.disabled-site-row {
+  grid-template-columns: minmax(180px, 1fr) auto;
 }
 
 label {
   display: grid;
   gap: 5px;
+}
+
+.checkbox-label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.checkbox-label input {
+  min-height: 0;
 }
 
 input,
@@ -71,6 +112,11 @@ button {
   font: inherit;
   min-height: 34px;
   padding: 5px 8px;
+}
+
+input:disabled,
+select:disabled {
+  opacity: .55;
 }
 
 button {
@@ -87,12 +133,25 @@ button {
   gap: 12px;
 }
 
-#addSite {
+#addSite,
+#addDisabledSite {
   font-weight: 700;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 960px) {
+  .default-row,
   .site-row {
+    grid-template-columns: 1fr;
+  }
+
+  .default-controls {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .default-controls,
+  .disabled-site-row {
     grid-template-columns: 1fr;
   }
 
