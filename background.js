@@ -4,15 +4,15 @@ const DEFAULT_SETTINGS = {
   sendZeroOnYouTube: true,
   enableKoneBase64AutoDecode: true,
   floatingScrollSites: [
-    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 25, buttonSize: 64, placement: "middle-right" },
-    { host: "kone.gg", upSpeed: 40, downSpeed: 2, fastDownSpeed: 10, buttonSize: 100, placement: "middle-right" }
+    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.25, fastDownSpeed: 30, buttonSize: 64, placement: "middle-right" },
+    { host: "kone.gg", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 15, buttonSize: 64, placement: "middle-right" }
   ],
   floatingScrollDefault: {
-    enabled: false,
+    enabled: true,
     upSpeed: 40,
     downSpeed: 1.5,
     fastDownSpeed: 20,
-    buttonSize: 64,
+    buttonSize: 40,
     placement: "middle-right"
   },
   floatingScrollDisabledSites: []

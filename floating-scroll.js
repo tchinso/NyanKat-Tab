@@ -25,26 +25,26 @@ const FLOATING_SCROLL_DEFAULT_SETTINGS = {
     {
       host: "dcinside.com",
       upSpeed: 40,
-      downSpeed: 1.5,
-      fastDownSpeed: 25,
+      downSpeed: 1.25,
+      fastDownSpeed: 30,
       buttonSize: 64,
       placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
     },
     {
       host: "kone.gg",
       upSpeed: 40,
-      downSpeed: 2,
-      fastDownSpeed: 10,
-      buttonSize: 100,
+      downSpeed: 1.5,
+      fastDownSpeed: 15,
+      buttonSize: 64,
       placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
     }
   ],
   floatingScrollDefault: {
-    enabled: false,
+    enabled: true,
     upSpeed: 40,
     downSpeed: 1.5,
     fastDownSpeed: 20,
-    buttonSize: 64,
+    buttonSize: 40,
     placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
   },
   floatingScrollDisabledSites: []
@@ -94,7 +94,7 @@ function normalizeSiteSetting(value) {
   return {
     host,
     upSpeed: clampNumber(value.upSpeed, 0.25, 80, 40),
-    downSpeed: clampNumber(value.downSpeed, 0.25, 80, 2),
+    downSpeed: clampNumber(value.downSpeed, 0.25, 80, 1.5),
     fastDownSpeed: clampNumber(value.fastDownSpeed, 0.25, 80, 20),
     buttonSize: clampNumber(value.buttonSize, FLOATING_SCROLL_MIN_SIZE, FLOATING_SCROLL_MAX_SIZE, 64),
     placement: normalizePlacement(value.placement)
@@ -111,7 +111,7 @@ function normalizeDefaultSiteSetting(value) {
       value && value.buttonSize,
       FLOATING_SCROLL_MIN_SIZE,
       FLOATING_SCROLL_MAX_SIZE,
-      64
+      40
     ),
     placement: normalizePlacement(value && value.placement)
   };

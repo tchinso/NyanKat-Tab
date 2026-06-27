@@ -5,17 +5,17 @@ const DEFAULT_SCROLL_CONFIG = {
   upSpeed: 40,
   downSpeed: 1.5,
   fastDownSpeed: 20,
-  buttonSize: 64,
+  buttonSize: 40,
   placement: DEFAULT_PLACEMENT
 };
 
 const DEFAULT_SETTINGS = {
   floatingScrollSites: [
-    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 25, buttonSize: 64, placement: DEFAULT_PLACEMENT },
-    { host: "kone.gg", upSpeed: 40, downSpeed: 2, fastDownSpeed: 10, buttonSize: 100, placement: DEFAULT_PLACEMENT }
+    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.25, fastDownSpeed: 30, buttonSize: 64, placement: DEFAULT_PLACEMENT },
+    { host: "kone.gg", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 15, buttonSize: 64, placement: DEFAULT_PLACEMENT }
   ],
   floatingScrollDefault: {
-    enabled: false,
+    enabled: true,
     ...DEFAULT_SCROLL_CONFIG
   },
   floatingScrollDisabledSites: []
@@ -207,7 +207,7 @@ function addRow(site) {
 
   row.querySelector(".host").value = site.host || "";
   row.querySelector(".upSpeed").value = String(site.upSpeed ?? 40);
-  row.querySelector(".downSpeed").value = String(site.downSpeed ?? 2);
+  row.querySelector(".downSpeed").value = String(site.downSpeed ?? 1.5);
   row.querySelector(".fastDownSpeed").value = String(site.fastDownSpeed ?? 20);
   row.querySelector(".buttonSize").value = String(clampNumber(site.buttonSize, 20, 140, 64));
   placementSelect.value = normalizePlacement(site.placement);
