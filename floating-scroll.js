@@ -17,6 +17,8 @@ let container = null;
 let scrollFrame = 0;
 let scrollSpeed = 0;
 let scrollAccumulator = 0;
+let scrollTarget = null;
+let lastScrollableElement = null;
 let dragState = null;
 let suppressNextButtonClick = false;
 let nextButtonScrollStartAt = 0;
@@ -102,12 +104,121 @@ function getMaxScrollTop() {
   return Math.max(0, scrollHeight - window.innerHeight);
 }
 
-function isAtScrollLimit(speed) {
-  const scrollTop = getScrollTop();
-  return speed > 0 ? scrollTop >= getMaxScrollTop() - 1 : scrollTop <= 0;
+function getElementMaxScrollTop(element) {
+  return Math.max(0, element.scrollHeight - element.clientHeight);
 }
 
-function scrollByAmount(scrollAmount) {
+function getScrollTargetTop(target) {
+  return target && target.element ? target.element.scrollTop : getScrollTop();
+}
+
+function getScrollTargetMaxTop(target) {
+  return target && target.element ? getElementMaxScrollTop(target.element) : getMaxScrollTop();
+}
+
+function canScrollTarget(target, speed) {
+  const scrollTop = getScrollTargetTop(target);
+  const maxScrollTop = getScrollTargetMaxTop(target);
+  return speed > 0 ? scrollTop < maxScrollTop - 1 : scrollTop > 0;
+}
+
+function isScrollableElement(element, speed) {
+  if (
+    !(element instanceof Element) ||
+    element === document.documentElement ||
+    element === document.body ||
+    (container && (element === container || container.contains(element))) ||
+    element.isConnected === false
+  ) {
+    return false;
+  }
+
+  const maxScrollTop = getElementMaxScrollTop(element);
+  if (maxScrollTop <= 1) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  if (!/(auto|scroll|overlay)/.test(style.overflowY)) {
+    return false;
+  }
+
+  if (!speed) {
+    return element.scrollTop > 0 || element.scrollTop < maxScrollTop - 1;
+  }
+
+  return speed > 0 ? element.scrollTop < maxScrollTop - 1 : element.scrollTop > 0;
+}
+
+function findClosestScrollableElement(target, speed) {
+  let element = target instanceof Element ? target : target && target.parentElement;
+
+  while (element && element !== document.documentElement) {
+    if (isScrollableElement(element, speed)) {
+      return element;
+    }
+
+    element = element.parentElement;
+  }
+
+  return null;
+}
+
+function findBestScrollableElement(speed) {
+  let bestElement = null;
+  let bestScore = 0;
+
+  for (const element of document.querySelectorAll("body *")) {
+    if (!isScrollableElement(element, speed)) {
+      continue;
+    }
+
+    const rect = element.getBoundingClientRect();
+    const visibleWidth = Math.min(window.innerWidth, rect.right) - Math.max(0, rect.left);
+    const visibleHeight = Math.min(window.innerHeight, rect.bottom) - Math.max(0, rect.top);
+    if (visibleWidth <= 0 || visibleHeight <= 0) {
+      continue;
+    }
+
+    const visibleArea = visibleWidth * visibleHeight;
+    const score = visibleArea + Math.min(getElementMaxScrollTop(element), 10000) * 10;
+    if (score > bestScore) {
+      bestScore = score;
+      bestElement = element;
+    }
+  }
+
+  return bestElement;
+}
+
+function findScrollTarget(speed) {
+  const documentTarget = { element: null };
+  if (canScrollTarget(documentTarget, speed)) {
+    return documentTarget;
+  }
+
+  if (isScrollableElement(lastScrollableElement, speed)) {
+    return { element: lastScrollableElement };
+  }
+
+  const activeScrollableElement = findClosestScrollableElement(document.activeElement, speed);
+  if (activeScrollableElement) {
+    return { element: activeScrollableElement };
+  }
+
+  const bestScrollableElement = findBestScrollableElement(speed);
+  return bestScrollableElement ? { element: bestScrollableElement } : documentTarget;
+}
+
+function isAtScrollLimit(speed) {
+  if (!scrollTarget || !canScrollTarget(scrollTarget, speed)) {
+    scrollTarget = findScrollTarget(speed);
+  }
+
+  return !canScrollTarget(scrollTarget, speed);
+}
+
+function scrollDocumentByAmount(scrollAmount) {
   const beforeScrollTop = getScrollTop();
   window.scrollBy(0, scrollAmount);
 
@@ -142,6 +253,41 @@ function scrollByAmount(scrollAmount) {
   return false;
 }
 
+function scrollElementByAmount(element, scrollAmount) {
+  const beforeScrollTop = element.scrollTop;
+  const nextScrollTop = clampNumber(
+    beforeScrollTop + scrollAmount,
+    0,
+    getElementMaxScrollTop(element),
+    beforeScrollTop
+  );
+  if (nextScrollTop === beforeScrollTop) {
+    return false;
+  }
+
+  element.scrollTop = nextScrollTop;
+  return element.scrollTop !== beforeScrollTop;
+}
+
+function scrollByAmount(scrollAmount) {
+  if (!scrollTarget || !canScrollTarget(scrollTarget, scrollSpeed)) {
+    scrollTarget = findScrollTarget(scrollSpeed);
+  }
+
+  if (scrollTarget && scrollTarget.element) {
+    if (scrollElementByAmount(scrollTarget.element, scrollAmount)) {
+      return true;
+    }
+
+    scrollTarget = findScrollTarget(scrollSpeed);
+    return scrollTarget && scrollTarget.element
+      ? scrollElementByAmount(scrollTarget.element, scrollAmount)
+      : scrollDocumentByAmount(scrollAmount);
+  }
+
+  return scrollDocumentByAmount(scrollAmount);
+}
+
 function stopAutoScroll() {
   if (scrollFrame) {
     window.cancelAnimationFrame(scrollFrame);
@@ -150,11 +296,13 @@ function stopAutoScroll() {
 
   scrollSpeed = 0;
   scrollAccumulator = 0;
+  scrollTarget = null;
 }
 
 function startAutoScroll(speed) {
   stopAutoScroll();
   scrollSpeed = speed;
+  scrollTarget = findScrollTarget(speed);
 
   const tick = () => {
     if (!scrollSpeed || isAtScrollLimit(scrollSpeed)) {
@@ -215,6 +363,26 @@ function positionContainer(left, top) {
   container.style.top = Math.round(clampNumber(top, 0, maxTop, 0)) + "px";
 }
 
+function handleButtonActivation(event, speed) {
+  if (suppressNextButtonClick) {
+    suppressNextButtonClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const now = Date.now();
+  if (now < nextButtonScrollStartAt) {
+    return;
+  }
+
+  nextButtonScrollStartAt = now + FLOATING_SCROLL_CLICK_COOLDOWN_MS;
+  startAutoScroll(speed);
+}
+
 function createButton(label, title, speed) {
   const button = document.createElement("button");
   button.type = "button";
@@ -239,31 +407,28 @@ function createButton(label, title, speed) {
     "width:" + siteSetting.buttonSize + "px"
   ].join(";");
 
-  button.addEventListener("click", (event) => {
-    if (suppressNextButtonClick) {
-      suppressNextButtonClick = false;
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-
-    event.preventDefault();
+  button.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
+  });
 
-    const now = Date.now();
-    if (now < nextButtonScrollStartAt) {
+  button.addEventListener("pointerup", (event) => {
+    if (event.button !== 0) {
       return;
     }
 
-    nextButtonScrollStartAt = now + FLOATING_SCROLL_CLICK_COOLDOWN_MS;
-    startAutoScroll(speed);
+    handleButtonActivation(event, speed);
   });
+  button.addEventListener("click", (event) => handleButtonActivation(event, speed));
 
   return button;
 }
 
 function handlePointerDown(event) {
-  if (!container || event.button !== 0) {
+  if (
+    !container ||
+    event.button !== 0 ||
+    (event.target instanceof Element && event.target.closest("button"))
+  ) {
     return;
   }
 
@@ -314,6 +479,17 @@ function handlePointerUp(event) {
   window.setTimeout(() => {
     suppressNextButtonClick = false;
   }, 0);
+}
+
+function rememberScrollableElement(event) {
+  if (container && container.contains(event.target)) {
+    return;
+  }
+
+  const scrollableElement = findClosestScrollableElement(event.target, 0);
+  if (scrollableElement) {
+    lastScrollableElement = scrollableElement;
+  }
 }
 
 function removeContainer() {
@@ -380,9 +556,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 window.addEventListener("mousedown", (event) => {
   if (!container || !container.contains(event.target)) {
+    rememberScrollableElement(event);
     stopAutoScroll();
   }
 }, true);
+window.addEventListener("wheel", rememberScrollableElement, { capture: true, passive: true });
 window.addEventListener("keydown", stopAutoScroll, true);
 window.addEventListener("blur", stopAutoScroll, true);
 window.addEventListener("resize", () => {

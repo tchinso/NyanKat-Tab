@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NyanKatX3 Tab",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "New tab redirect, fallback navigation, YouTube start helper, Base64 decoding, and site-specific floating auto-scroll buttons.",
   "icons": {
     "16": "icon16.png",
@@ -57,7 +57,8 @@
       "js": [
         "floating-scroll.js"
       ],
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true
     },
     {
       "matches": [
