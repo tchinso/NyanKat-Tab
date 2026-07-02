@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "NyanKatX3 Tab",
-  "version": "1.1.2",
-  "description": "New tab redirect, fallback navigation, YouTube start helper, Base64 decoding, and site-specific floating auto-scroll buttons.",
+  "version": "1.1.3",
+  "description": "New tab redirect, YouTube helper, Base64 decoding, floating auto-scroll, and local kio.ac download status.",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
@@ -69,6 +69,17 @@
         "kone-base64-decoder.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://kio.ac/*",
+        "https://*.kio.ac/*"
+      ],
+      "js": [
+        "kio-download-watcher.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "options_ui": {

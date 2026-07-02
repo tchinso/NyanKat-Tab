@@ -26,15 +26,39 @@ const FLOATING_SCROLL_DEFAULT_SETTINGS = {
       host: "dcinside.com",
       upSpeed: 40,
       downSpeed: 1.25,
-      fastDownSpeed: 30,
+      fastDownSpeed: 12,
       buttonSize: 64,
       placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
     },
     {
       host: "kone.gg",
-      upSpeed: 40,
+      upSpeed: 30,
       downSpeed: 1.5,
       fastDownSpeed: 15,
+      buttonSize: 64,
+      placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
+    },
+    {
+      host: "youtube.com",
+      upSpeed: 40,
+      downSpeed: 1.5,
+      fastDownSpeed: 20,
+      buttonSize: 30,
+      placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
+    },
+    {
+      host: "localhost",
+      upSpeed: 40,
+      downSpeed: 1.5,
+      fastDownSpeed: 20,
+      buttonSize: 60,
+      placement: "top-center"
+    },
+    {
+      host: "chatgpt.com",
+      upSpeed: 40,
+      downSpeed: 1.5,
+      fastDownSpeed: 20,
       buttonSize: 64,
       placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
     }
@@ -42,12 +66,12 @@ const FLOATING_SCROLL_DEFAULT_SETTINGS = {
   floatingScrollDefault: {
     enabled: true,
     upSpeed: 40,
-    downSpeed: 1.5,
-    fastDownSpeed: 20,
-    buttonSize: 40,
+    downSpeed: 2.5,
+    fastDownSpeed: 25,
+    buttonSize: 48,
     placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
   },
-  floatingScrollDisabledSites: []
+  floatingScrollDisabledSites: ["fav.ju.mp", "kio.ac", "pan.baidu.com", "kmcert.com"]
 };
 
 const FLOATING_SCROLL_MIN_SIZE = 20;
@@ -105,13 +129,13 @@ function normalizeDefaultSiteSetting(value) {
   return {
     enabled: Boolean(value && value.enabled),
     upSpeed: clampNumber(value && value.upSpeed, 0.25, 80, 40),
-    downSpeed: clampNumber(value && value.downSpeed, 0.25, 80, 1.5),
-    fastDownSpeed: clampNumber(value && value.fastDownSpeed, 0.25, 80, 20),
+    downSpeed: clampNumber(value && value.downSpeed, 0.25, 80, 2.5),
+    fastDownSpeed: clampNumber(value && value.fastDownSpeed, 0.25, 80, 25),
     buttonSize: clampNumber(
       value && value.buttonSize,
       FLOATING_SCROLL_MIN_SIZE,
       FLOATING_SCROLL_MAX_SIZE,
-      40
+      48
     ),
     placement: normalizePlacement(value && value.placement)
   };

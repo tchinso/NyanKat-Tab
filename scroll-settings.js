@@ -3,22 +3,25 @@
 const DEFAULT_PLACEMENT = "middle-right";
 const DEFAULT_SCROLL_CONFIG = {
   upSpeed: 40,
-  downSpeed: 1.5,
-  fastDownSpeed: 20,
-  buttonSize: 40,
+  downSpeed: 2.5,
+  fastDownSpeed: 25,
+  buttonSize: 48,
   placement: DEFAULT_PLACEMENT
 };
 
 const DEFAULT_SETTINGS = {
   floatingScrollSites: [
-    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.25, fastDownSpeed: 30, buttonSize: 64, placement: DEFAULT_PLACEMENT },
-    { host: "kone.gg", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 15, buttonSize: 64, placement: DEFAULT_PLACEMENT }
+    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.25, fastDownSpeed: 12, buttonSize: 64, placement: DEFAULT_PLACEMENT },
+    { host: "kone.gg", upSpeed: 30, downSpeed: 1.5, fastDownSpeed: 15, buttonSize: 64, placement: DEFAULT_PLACEMENT },
+    { host: "youtube.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 20, buttonSize: 30, placement: DEFAULT_PLACEMENT },
+    { host: "localhost", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 20, buttonSize: 60, placement: "top-center" },
+    { host: "chatgpt.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 20, buttonSize: 64, placement: DEFAULT_PLACEMENT }
   ],
   floatingScrollDefault: {
     enabled: true,
     ...DEFAULT_SCROLL_CONFIG
   },
-  floatingScrollDisabledSites: []
+  floatingScrollDisabledSites: ["fav.ju.mp", "kio.ac", "pan.baidu.com", "kmcert.com"]
 };
 
 const PLACEMENT_OPTIONS = [
@@ -207,8 +210,8 @@ function addRow(site) {
 
   row.querySelector(".host").value = site.host || "";
   row.querySelector(".upSpeed").value = String(site.upSpeed ?? 40);
-  row.querySelector(".downSpeed").value = String(site.downSpeed ?? 1.5);
-  row.querySelector(".fastDownSpeed").value = String(site.fastDownSpeed ?? 20);
+  row.querySelector(".downSpeed").value = String(site.downSpeed ?? DEFAULT_SCROLL_CONFIG.downSpeed);
+  row.querySelector(".fastDownSpeed").value = String(site.fastDownSpeed ?? DEFAULT_SCROLL_CONFIG.fastDownSpeed);
   row.querySelector(".buttonSize").value = String(clampNumber(site.buttonSize, 20, 140, 64));
   placementSelect.value = normalizePlacement(site.placement);
 
@@ -266,8 +269,8 @@ addSiteButton.addEventListener("click", () => {
   addRow({
     host: "",
     upSpeed: 40,
-    downSpeed: 1.5,
-    fastDownSpeed: 20,
+    downSpeed: DEFAULT_SCROLL_CONFIG.downSpeed,
+    fastDownSpeed: DEFAULT_SCROLL_CONFIG.fastDownSpeed,
     buttonSize: 64,
     placement: DEFAULT_PLACEMENT
   });

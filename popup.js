@@ -12,6 +12,7 @@ const checkboxControls = {
 
 const statusElement = document.querySelector("#status");
 const openScrollSettingsButton = document.querySelector("#openScrollSettings");
+const openKioDownloadButton = document.querySelector("#openKioDownload");
 let statusTimer = 0;
 
 function setStatus(text) {
@@ -39,4 +40,8 @@ chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
 
 openScrollSettingsButton.addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
+});
+
+openKioDownloadButton.addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("kiodownload.html") });
 });

@@ -4,18 +4,21 @@ const DEFAULT_SETTINGS = {
   sendZeroOnYouTube: true,
   enableKoneBase64AutoDecode: true,
   floatingScrollSites: [
-    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.25, fastDownSpeed: 30, buttonSize: 64, placement: "middle-right" },
-    { host: "kone.gg", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 15, buttonSize: 64, placement: "middle-right" }
+    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.25, fastDownSpeed: 12, buttonSize: 64, placement: "middle-right" },
+    { host: "kone.gg", upSpeed: 30, downSpeed: 1.5, fastDownSpeed: 15, buttonSize: 64, placement: "middle-right" },
+    { host: "youtube.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 20, buttonSize: 30, placement: "middle-right" },
+    { host: "localhost", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 20, buttonSize: 60, placement: "top-center" },
+    { host: "chatgpt.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 20, buttonSize: 64, placement: "middle-right" }
   ],
   floatingScrollDefault: {
     enabled: true,
     upSpeed: 40,
-    downSpeed: 1.5,
-    fastDownSpeed: 20,
-    buttonSize: 40,
+    downSpeed: 2.5,
+    fastDownSpeed: 25,
+    buttonSize: 48,
     placement: "middle-right"
   },
-  floatingScrollDisabledSites: []
+  floatingScrollDisabledSites: ["fav.ju.mp", "kio.ac", "pan.baidu.com", "kmcert.com"]
 };
 
 const OBSOLETE_SETTINGS = ["blockUpwardWheel", "mouseGestureAutoScrollMode", "autoScrollSpeed"];
@@ -28,10 +31,22 @@ const BASE64_MAX_DECODE_DEPTH = 3;
 const WEB_DOCUMENT_PATTERNS = ["http://*/*", "https://*/*"];
 const PAGE_CONTEXTS = ["page", "frame", "link", "image", "video", "audio"];
 
+const KIO_DOWNLOAD_STATS_MESSAGE_TYPE = "nyankat-kio-download-stats";
+const KIO_DOWNLOAD_GET_STATS_MESSAGE_TYPE = "nyankat-kio-download-get-stats";
+const KIO_DOWNLOAD_STATS_UPDATED_MESSAGE_TYPE = "nyankat-kio-download-stats-updated";
+const KIO_DOWNLOAD_PORT_NAME = "nyankat-kio-download-page";
+const KIO_DOWNLOAD_STORAGE_KEY = "nyankatKioDownloadStats";
+const KIO_DOWNLOAD_MAX_MATCHES = 80;
+const KIO_DOWNLOAD_MAX_TEXT_LENGTH = 700;
+const KIO_DOWNLOAD_STALE_MS = 15 * 60 * 1000;
+
 const FALLBACK_BY_HOST = {
   "fav.ju.mp": "https://12tw.pages.dev/",
   "12tw.pages.dev": "https://tchinso.github.io/fav/"
 };
+
+let kioDownloadStats = {};
+const kioDownloadPorts = new Set();
 
 function ensureDefaultSettings() {
   chrome.storage.sync.remove(OBSOLETE_SETTINGS);
@@ -189,6 +204,142 @@ function sendBase64Result(tabId, frameId, result) {
   chrome.tabs.sendMessage(tabId, message, callback);
 }
 
+function limitText(value, maxLength, targetText = "") {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  const targetIndex = targetText ? text.indexOf(targetText) : -1;
+  if (targetIndex === -1) {
+    return text.slice(0, maxLength - 1) + "…";
+  }
+
+  const sliceLength = Math.max(1, maxLength - 2);
+  const start = Math.max(0, Math.min(targetIndex - Math.floor(sliceLength / 2), text.length - sliceLength));
+  const end = Math.min(text.length, start + sliceLength);
+
+  return (start > 0 ? "…" : "") + text.slice(start, end) + (end < text.length ? "…" : "");
+}
+
+function normalizeKioDownloadMatches(matches) {
+  if (!Array.isArray(matches)) {
+    return [];
+  }
+
+  return matches
+    .slice(0, KIO_DOWNLOAD_MAX_MATCHES)
+    .map((match, index) => ({
+      id: limitText(match && match.id ? match.id : String(index), 100),
+      source: limitText(match && match.source ? match.source : "text", 80),
+      path: limitText(match && match.path ? match.path : "", 180),
+      text: limitText(match && match.text ? match.text : "", KIO_DOWNLOAD_MAX_TEXT_LENGTH, "B/s)"),
+      detectedAt: Number(match && match.detectedAt) || Date.now()
+    }))
+    .filter((match) => match.text.includes("B/s)"));
+}
+
+function pruneKioDownloadStats() {
+  const cutoff = Date.now() - KIO_DOWNLOAD_STALE_MS;
+  let changed = false;
+
+  for (const [key, entry] of Object.entries(kioDownloadStats)) {
+    if (!entry || entry.updatedAt < cutoff) {
+      delete kioDownloadStats[key];
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function getKioDownloadEntries() {
+  pruneKioDownloadStats();
+  return Object.values(kioDownloadStats).sort((first, second) => second.updatedAt - first.updatedAt);
+}
+
+function persistKioDownloadStats() {
+  if (!chrome.storage || !chrome.storage.session) {
+    return;
+  }
+
+  chrome.storage.session.set({ [KIO_DOWNLOAD_STORAGE_KEY]: kioDownloadStats });
+}
+
+function restoreKioDownloadStats(callback) {
+  if (!chrome.storage || !chrome.storage.session) {
+    callback();
+    return;
+  }
+
+  chrome.storage.session.get(KIO_DOWNLOAD_STORAGE_KEY, (result) => {
+    const storedStats = result && result[KIO_DOWNLOAD_STORAGE_KEY];
+    if (storedStats && typeof storedStats === "object") {
+      kioDownloadStats = storedStats;
+      if (pruneKioDownloadStats()) {
+        persistKioDownloadStats();
+      }
+    }
+
+    callback();
+  });
+}
+
+function broadcastKioDownloadStats() {
+  const message = {
+    type: KIO_DOWNLOAD_STATS_UPDATED_MESSAGE_TYPE,
+    entries: getKioDownloadEntries()
+  };
+
+  for (const port of kioDownloadPorts) {
+    port.postMessage(message);
+  }
+}
+
+function handleKioDownloadStats(message, sender) {
+  if (!sender || !sender.tab || typeof sender.tab.id !== "number") {
+    return;
+  }
+
+  const tabId = sender.tab.id;
+  const frameId = typeof sender.frameId === "number" ? sender.frameId : 0;
+  const key = tabId + ":" + frameId;
+  const matches = normalizeKioDownloadMatches(message.matches);
+
+  kioDownloadStats[key] = {
+    key,
+    tabId,
+    frameId,
+    url: limitText(message.url || sender.url || (sender.tab && sender.tab.url) || "", 2048),
+    title: limitText(message.title || (sender.tab && sender.tab.title) || "kio.ac", 200),
+    matches,
+    matchCount: matches.length,
+    unlockedButtonCount: Number(message.unlockedButtonCount) || 0,
+    updatedAt: Date.now()
+  };
+
+  pruneKioDownloadStats();
+  persistKioDownloadStats();
+  broadcastKioDownloadStats();
+}
+
+function removeKioDownloadStatsForTab(tabId) {
+  let changed = false;
+  const prefix = tabId + ":";
+
+  for (const key of Object.keys(kioDownloadStats)) {
+    if (key.startsWith(prefix)) {
+      delete kioDownloadStats[key];
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    persistKioDownloadStats();
+    broadcastKioDownloadStats();
+  }
+}
+
 function handleInstalled() {
   ensureDefaultSettings();
   recreateContextMenus();
@@ -196,6 +347,42 @@ function handleInstalled() {
 
 chrome.runtime.onInstalled.addListener(handleInstalled);
 chrome.runtime.onStartup.addListener(ensureDefaultSettings);
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || typeof message.type !== "string") {
+    return;
+  }
+
+  if (message.type === KIO_DOWNLOAD_STATS_MESSAGE_TYPE) {
+    handleKioDownloadStats(message, sender);
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (message.type === KIO_DOWNLOAD_GET_STATS_MESSAGE_TYPE) {
+    restoreKioDownloadStats(() => {
+      sendResponse({ ok: true, entries: getKioDownloadEntries() });
+    });
+    return true;
+  }
+});
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== KIO_DOWNLOAD_PORT_NAME) {
+    return;
+  }
+
+  kioDownloadPorts.add(port);
+  restoreKioDownloadStats(() => {
+    port.postMessage({
+      type: KIO_DOWNLOAD_STATS_UPDATED_MESSAGE_TYPE,
+      entries: getKioDownloadEntries()
+    });
+  });
+  port.onDisconnect.addListener(() => {
+    kioDownloadPorts.delete(port);
+  });
+});
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === CONTEXT_MENU_DISABLE_SCROLL_SITE_ID) {
@@ -240,3 +427,5 @@ chrome.webNavigation.onErrorOccurred.addListener(
     ]
   }
 );
+
+chrome.tabs.onRemoved.addListener(removeKioDownloadStatsForTab);
