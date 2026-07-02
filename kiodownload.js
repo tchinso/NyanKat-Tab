@@ -132,6 +132,7 @@ function requestEntries() {
 }
 
 refreshButton.addEventListener("click", requestEntries);
+window.setInterval(requestEntries, 2000);
 
 const port = chrome.runtime.connect({ name: KIO_DOWNLOAD_PORT_NAME });
 port.onMessage.addListener((message) => {
