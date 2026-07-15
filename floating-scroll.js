@@ -76,7 +76,6 @@ const FLOATING_SCROLL_DEFAULT_SETTINGS = {
 
 const FLOATING_SCROLL_MIN_SIZE = 20;
 const FLOATING_SCROLL_MAX_SIZE = 140;
-const FLOATING_SCROLL_CLICK_COOLDOWN_MS = 800;
 
 let siteSetting = null;
 let container = null;
@@ -85,7 +84,6 @@ let scrollSpeed = 0;
 let scrollAccumulator = 0;
 let scrollTarget = null;
 let lastScrollableElement = null;
-let nextButtonScrollStartAt = 0;
 
 function normalizeHost(value) {
   return String(value || "")
@@ -248,11 +246,15 @@ function findClosestScrollableElement(target, speed) {
   return null;
 }
 
-function findBestScrollableElement(speed) {
+function findBestScrollableElement(speed, excludedElement = null) {
   let bestElement = null;
   let bestScore = 0;
 
   for (const element of document.querySelectorAll("body *")) {
+    if (element === excludedElement) {
+      continue;
+    }
+
     if (!isScrollableElement(element, speed)) {
       continue;
     }
@@ -275,23 +277,27 @@ function findBestScrollableElement(speed) {
   return bestElement;
 }
 
+function findScrollableElementTarget(speed, excludedElement = null) {
+  if (lastScrollableElement !== excludedElement && isScrollableElement(lastScrollableElement, speed)) {
+    return { element: lastScrollableElement };
+  }
+
+  const activeScrollableElement = findClosestScrollableElement(document.activeElement, speed);
+  if (activeScrollableElement && activeScrollableElement !== excludedElement) {
+    return { element: activeScrollableElement };
+  }
+
+  const bestScrollableElement = findBestScrollableElement(speed, excludedElement);
+  return bestScrollableElement ? { element: bestScrollableElement } : null;
+}
+
 function findScrollTarget(speed) {
   const documentTarget = { element: null };
   if (canScrollTarget(documentTarget, speed)) {
     return documentTarget;
   }
 
-  if (isScrollableElement(lastScrollableElement, speed)) {
-    return { element: lastScrollableElement };
-  }
-
-  const activeScrollableElement = findClosestScrollableElement(document.activeElement, speed);
-  if (activeScrollableElement) {
-    return { element: activeScrollableElement };
-  }
-
-  const bestScrollableElement = findBestScrollableElement(speed);
-  return bestScrollableElement ? { element: bestScrollableElement } : documentTarget;
+  return findScrollableElementTarget(speed) || documentTarget;
 }
 
 function isAtScrollLimit(speed) {
@@ -363,13 +369,27 @@ function scrollByAmount(scrollAmount) {
       return true;
     }
 
-    scrollTarget = findScrollTarget(scrollSpeed);
-    return scrollTarget && scrollTarget.element
-      ? scrollElementByAmount(scrollTarget.element, scrollAmount)
-      : scrollDocumentByAmount(scrollAmount);
+    const alternativeTarget = findScrollableElementTarget(scrollSpeed, scrollTarget.element);
+    if (alternativeTarget && scrollElementByAmount(alternativeTarget.element, scrollAmount)) {
+      scrollTarget = alternativeTarget;
+      return true;
+    }
+
+    scrollTarget = { element: null };
+    return scrollDocumentByAmount(scrollAmount);
   }
 
-  return scrollDocumentByAmount(scrollAmount);
+  if (scrollDocumentByAmount(scrollAmount)) {
+    return true;
+  }
+
+  const alternativeTarget = findScrollableElementTarget(scrollSpeed);
+  if (alternativeTarget && scrollElementByAmount(alternativeTarget.element, scrollAmount)) {
+    scrollTarget = alternativeTarget;
+    return true;
+  }
+
+  return false;
 }
 
 function stopAutoScroll() {
@@ -445,13 +465,6 @@ function positionContainer() {
 function handleButtonActivation(event, speed) {
   event.preventDefault();
   event.stopPropagation();
-
-  const now = Date.now();
-  if (now < nextButtonScrollStartAt) {
-    return;
-  }
-
-  nextButtonScrollStartAt = now + FLOATING_SCROLL_CLICK_COOLDOWN_MS;
   startAutoScroll(speed);
 }
 
@@ -483,13 +496,6 @@ function createButton(label, title, speed) {
     event.stopPropagation();
   });
 
-  button.addEventListener("pointerup", (event) => {
-    if (event.button !== 0) {
-      return;
-    }
-
-    handleButtonActivation(event, speed);
-  });
   button.addEventListener("click", (event) => handleButtonActivation(event, speed));
 
   return button;
@@ -513,7 +519,6 @@ function removeContainer() {
     container = null;
   }
 
-  nextButtonScrollStartAt = 0;
 }
 
 function renderContainer() {

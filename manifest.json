@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NyanKatX3 Tab",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "New tab redirect, YouTube helper, Base64 decoding, floating auto-scroll, and local kio.ac download status.",
   "icons": {
     "16": "icon16.png",
@@ -58,7 +58,7 @@
         "floating-scroll.js"
       ],
       "run_at": "document_start",
-      "all_frames": true
+      "all_frames": false
     },
     {
       "matches": [
