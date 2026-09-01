@@ -1,0 +1,29 @@
+.nyankat-subtitle-overlay {
+  align-items: flex-end;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  padding: 2% 3%;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+.nyankat-subtitle-overlay[hidden] {
+  display: none !important;
+}
+
+.nyankat-subtitle-text {
+  background: rgba(0, 0, 0, .8);
+  border-radius: .35em;
+  box-sizing: border-box;
+  color: #fff;
+  font-family: var(--nyankat-subtitle-font, "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif);
+  font-size: var(--nyankat-subtitle-font-size, 48px);
+  line-height: 1.35;
+  max-width: 90%;
+  padding: .25em .5em;
+  text-align: center;
+  text-shadow: 0 0 6px rgba(0, 0, 0, .6), 0 0 2px rgba(0, 0, 0, .8);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

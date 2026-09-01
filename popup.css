@@ -7,7 +7,7 @@ body {
   background: Canvas;
   color: CanvasText;
   margin: 0;
-  min-width: 340px;
+  min-width: 400px;
 }
 
 header {
@@ -19,6 +19,8 @@ header {
 }
 
 h1,
+h2,
+h3,
 p {
   margin: 0;
 }
@@ -28,17 +30,61 @@ h1 {
   font-weight: 700;
 }
 
+h2 {
+  font-size: 15px;
+}
+
+h3 {
+  font-size: 13px;
+}
+
 p,
 small,
+output,
 footer {
   color: color-mix(in srgb, CanvasText 70%, transparent);
   font-size: 12px;
 }
 
+.tab-list {
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+
+.tab-button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: color-mix(in srgb, CanvasText 70%, transparent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.tab-button[aria-selected="true"] {
+  border-bottom-color: #0f8b8d;
+  color: CanvasText;
+}
+
 main {
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.tab-panel {
   display: grid;
   gap: 8px;
   padding: 12px;
+}
+
+.tab-panel[hidden] {
+  display: none;
 }
 
 .toggle-row,
@@ -70,21 +116,182 @@ input[type="checkbox"] {
   width: 20px;
 }
 
-.link-button {
+button,
+input,
+select {
+  font: inherit;
+}
+
+.link-button,
+.subtitle-actions button,
+.sync-buttons button,
+.icon-button {
   background: Canvas;
   border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
   border-radius: 6px;
   color: CanvasText;
   cursor: pointer;
-  font: inherit;
-  font-size: 13px;
   min-height: 36px;
   padding: 8px 10px;
+}
+
+.link-button {
+  font-size: 13px;
   text-align: left;
 }
 
 footer {
   border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
   min-height: 18px;
+  margin: 4px -12px -12px;
   padding: 10px 14px 12px;
+}
+
+.subtitle-panel {
+  gap: 10px;
+}
+
+.subtitle-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.subtitle-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+}
+
+.subtitle-row > label {
+  color: color-mix(in srgb, CanvasText 78%, transparent);
+  font-size: 12px;
+}
+
+.subtitle-row input[type="text"],
+.subtitle-row input[type="number"],
+.subtitle-row select,
+.file-row input[type="file"] {
+  background: Canvas;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 6px;
+  color: CanvasText;
+  min-height: 34px;
+  min-width: 0;
+  padding: 5px 8px;
+  width: 100%;
+}
+
+.file-row {
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+
+.icon-button {
+  font-size: 18px;
+  line-height: 1;
+  min-height: 34px;
+  padding: 2px;
+  width: 34px;
+}
+
+.sync-row {
+  align-items: start;
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+
+.sync-controls {
+  display: grid;
+  gap: 7px;
+}
+
+.offset-value {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.offset-value input {
+  background: Canvas;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 6px;
+  color: CanvasText;
+  min-height: 32px;
+  padding: 4px 6px;
+  width: 100px;
+}
+
+.sync-buttons {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sync-buttons button {
+  font-size: 11px;
+  min-height: 31px;
+  padding: 4px;
+}
+
+.sync-controls small {
+  line-height: 1.35;
+}
+
+.subtitle-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.subtitle-actions .primary-button {
+  background: #0f8b8d;
+  border-color: #0f8b8d;
+  color: white;
+  font-weight: 700;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  margin: 4px 0;
+}
+
+.compact-row {
+  grid-template-columns: 76px 46px 76px 46px;
+}
+
+.compact-row input[type="color"] {
+  background: transparent;
+  border: 0;
+  height: 30px;
+  padding: 0;
+  width: 42px;
+}
+
+.subtitle-row input[type="range"] {
+  min-width: 0;
+  width: 100%;
+}
+
+.subtitle-checkbox {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 7px;
+  margin-left: 96px;
+}
+
+.subtitle-status {
+  line-height: 1.4;
+  min-height: 18px;
+}
+
+button:hover {
+  filter: brightness(1.05);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid #0f8b8d;
+  outline-offset: 2px;
 }

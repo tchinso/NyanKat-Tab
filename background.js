@@ -3,20 +3,12 @@
 const DEFAULT_SETTINGS = {
   sendZeroOnYouTube: true,
   enableKoneBase64AutoDecode: true,
-  floatingScrollSites: [
-    { host: "dcinside.com", upSpeed: 40, downSpeed: 1.25, fastDownSpeed: 12, buttonSize: 64, placement: "middle-right" },
-    { host: "kone.gg", upSpeed: 30, downSpeed: 1.5, fastDownSpeed: 15, buttonSize: 64, placement: "middle-right" },
-    { host: "youtube.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 20, buttonSize: 30, placement: "middle-right" },
-    { host: "localhost", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 20, buttonSize: 60, placement: "top-center" },
-    { host: "chatgpt.com", upSpeed: 40, downSpeed: 1.5, fastDownSpeed: 20, buttonSize: 64, placement: "middle-right" }
-  ],
-  floatingScrollDefault: {
+  floatingScrollSettings: {
     enabled: true,
-    upSpeed: 40,
     downSpeed: 2.5,
     fastDownSpeed: 25,
     buttonSize: 48,
-    placement: "middle-right"
+    position: { x: 1, y: 0.5 }
   },
   floatingScrollDisabledSites: ["fav.ju.mp", "kio.ac", "pan.baidu.com", "kmcert.com"]
 };
@@ -26,6 +18,7 @@ const OBSOLETE_SETTINGS = ["blockUpwardWheel", "mouseGestureAutoScrollMode", "au
 const CONTEXT_MENU_ROOT_ID = "nyankat-tools";
 const CONTEXT_MENU_BASE64_DECODE_ID = "nyankat-base64-decode";
 const CONTEXT_MENU_DISABLE_SCROLL_SITE_ID = "nyankat-disable-scroll-site";
+const CONTEXT_MENU_ENABLE_SCROLL_SITE_ID = "nyankat-enable-scroll-site";
 const BASE64_RESULT_MESSAGE_TYPE = "nyankat-base64-decode-result";
 const BASE64_MAX_DECODE_DEPTH = 3;
 const WEB_DOCUMENT_PATTERNS = ["http://*/*", "https://*/*"];
@@ -90,6 +83,14 @@ function recreateContextMenus() {
       contexts: PAGE_CONTEXTS,
       documentUrlPatterns: WEB_DOCUMENT_PATTERNS
     });
+
+    chrome.contextMenus.create({
+      id: CONTEXT_MENU_ENABLE_SCROLL_SITE_ID,
+      parentId: CONTEXT_MENU_ROOT_ID,
+      title: "이 사이트를 스크롤 버튼 미사용 목록에서 제거",
+      contexts: PAGE_CONTEXTS,
+      documentUrlPatterns: WEB_DOCUMENT_PATTERNS
+    });
   });
 }
 
@@ -127,6 +128,23 @@ function addFloatingScrollDisabledSite(host) {
 
     chrome.storage.sync.set({
       floatingScrollDisabledSites: [...sites, normalizedHost].sort()
+    });
+  });
+}
+
+function removeFloatingScrollDisabledSite(host) {
+  const normalizedHost = normalizeHost(host);
+  if (!normalizedHost) {
+    return;
+  }
+
+  chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
+    const sites = Array.isArray(settings.floatingScrollDisabledSites)
+      ? settings.floatingScrollDisabledSites.map(normalizeHost).filter(Boolean)
+      : [];
+
+    chrome.storage.sync.set({
+      floatingScrollDisabledSites: sites.filter((site) => site !== normalizedHost)
     });
   });
 }
@@ -387,6 +405,11 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === CONTEXT_MENU_DISABLE_SCROLL_SITE_ID) {
     addFloatingScrollDisabledSite(getHostFromUrl(info.pageUrl || (tab && tab.url) || ""));
+    return;
+  }
+
+  if (info.menuItemId === CONTEXT_MENU_ENABLE_SCROLL_SITE_ID) {
+    removeFloatingScrollDisabledSite(getHostFromUrl(info.pageUrl || (tab && tab.url) || ""));
     return;
   }
 

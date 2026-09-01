@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "NyanKatX3 Tab",
-  "version": "1.1.5",
-  "description": "New tab redirect, YouTube helper, Base64 decoding, floating auto-scroll, and local kio.ac download status.",
+  "version": "1.2.0",
+  "description": "New tab redirect, video subtitle overlay, Base64 decoding, floating auto-scroll, and local kio.ac download status.",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
@@ -59,6 +59,22 @@
       ],
       "run_at": "document_start",
       "all_frames": false
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "subtitle-parser.js",
+        "subtitle-overlay.js"
+      ],
+      "css": [
+        "subtitle-overlay.css"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_origin_as_fallback": true
     },
     {
       "matches": [

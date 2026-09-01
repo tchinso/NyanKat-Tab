@@ -32,7 +32,7 @@ h2 {
 }
 
 p,
-span,
+label > span,
 #status {
   color: color-mix(in srgb, CanvasText 70%, transparent);
   font-size: 12px;
@@ -40,10 +40,10 @@ span,
 
 main {
   display: grid;
-  gap: 16px;
+  gap: 18px;
   margin: 0 auto;
-  max-width: 1240px;
-  padding: 18px;
+  max-width: 760px;
+  padding: 20px;
 }
 
 .settings-section {
@@ -51,39 +51,33 @@ main {
   gap: 10px;
 }
 
-#siteList,
-#disabledSiteList {
-  display: grid;
-  gap: 10px;
-}
-
-.default-row,
-.site-row,
-.disabled-site-row {
-  align-items: end;
+.settings-card,
+.textarea-label {
   border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
   border-radius: 8px;
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 14px;
+  padding: 14px;
 }
 
-.site-row {
-  grid-template-columns: minmax(180px, 1.4fr) minmax(130px, .9fr) repeat(4, minmax(94px, .75fr)) auto;
+.checkbox-label {
+  align-items: center;
+  color: CanvasText;
+  display: flex;
+  gap: 8px;
+  min-height: 34px;
 }
 
-.default-row {
-  grid-template-columns: minmax(220px, auto) 1fr;
+.checkbox-label span {
+  color: CanvasText;
+  font-size: 14px;
+  font-weight: 700;
 }
 
-.default-controls {
+.control-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(5, minmax(100px, 1fr));
-}
-
-.disabled-site-row {
-  grid-template-columns: minmax(180px, 1fr) auto;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
 }
 
 label {
@@ -91,71 +85,44 @@ label {
   gap: 5px;
 }
 
-.checkbox-label {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  min-height: 34px;
-}
-
-.checkbox-label input {
-  min-height: 0;
-}
-
 input,
-select,
-button {
+textarea {
   background: Canvas;
   border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
   border-radius: 6px;
   color: CanvasText;
   font: inherit;
   min-height: 34px;
-  padding: 5px 8px;
+  padding: 6px 8px;
 }
 
-input:disabled,
-select:disabled {
+textarea {
+  line-height: 1.45;
+  min-height: 150px;
+  resize: vertical;
+}
+
+input[type="checkbox"] {
+  accent-color: #0f8b8d;
+  min-height: 0;
+}
+
+input:disabled {
   opacity: .55;
 }
 
-button {
-  cursor: pointer;
+.hint {
+  line-height: 1.5;
 }
 
-.remove {
-  color: #b91c1c;
+footer {
+  border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  min-height: 18px;
+  padding: 10px 20px 14px;
 }
 
-.actions {
-  align-items: center;
-  display: flex;
-  gap: 12px;
-}
-
-#addSite,
-#addDisabledSite {
-  font-weight: 700;
-}
-
-@media (max-width: 960px) {
-  .default-row,
-  .site-row {
+@media (max-width: 560px) {
+  .control-grid {
     grid-template-columns: 1fr;
-  }
-
-  .default-controls {
-    grid-template-columns: repeat(2, minmax(120px, 1fr));
-  }
-}
-
-@media (max-width: 760px) {
-  .default-controls,
-  .disabled-site-row {
-    grid-template-columns: 1fr;
-  }
-
-  .remove {
-    justify-self: start;
   }
 }

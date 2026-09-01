@@ -1,89 +1,31 @@
 "use strict";
 
-const FLOATING_SCROLL_DEFAULT_PLACEMENT = "middle-right";
-const FLOATING_SCROLL_PLACEMENTS = new Set([
-  "top-left",
-  "top-center",
-  "top-right",
-  "middle-left",
-  "middle-right",
-  "bottom-left",
-  "bottom-center",
-  "bottom-right"
-]);
-const FLOATING_SCROLL_HORIZONTAL_PLACEMENTS = new Set([
-  "top-left",
-  "top-center",
-  "top-right",
-  "bottom-left",
-  "bottom-center",
-  "bottom-right"
-]);
-
 const FLOATING_SCROLL_DEFAULT_SETTINGS = {
-  floatingScrollSites: [
-    {
-      host: "dcinside.com",
-      upSpeed: 40,
-      downSpeed: 1.25,
-      fastDownSpeed: 12,
-      buttonSize: 64,
-      placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
-    },
-    {
-      host: "kone.gg",
-      upSpeed: 30,
-      downSpeed: 1.5,
-      fastDownSpeed: 15,
-      buttonSize: 64,
-      placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
-    },
-    {
-      host: "youtube.com",
-      upSpeed: 40,
-      downSpeed: 1.5,
-      fastDownSpeed: 20,
-      buttonSize: 30,
-      placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
-    },
-    {
-      host: "localhost",
-      upSpeed: 40,
-      downSpeed: 1.5,
-      fastDownSpeed: 20,
-      buttonSize: 60,
-      placement: "top-center"
-    },
-    {
-      host: "chatgpt.com",
-      upSpeed: 40,
-      downSpeed: 1.5,
-      fastDownSpeed: 20,
-      buttonSize: 64,
-      placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
-    }
-  ],
-  floatingScrollDefault: {
+  floatingScrollSettings: {
     enabled: true,
-    upSpeed: 40,
+    buttonSize: 48,
     downSpeed: 2.5,
     fastDownSpeed: 25,
-    buttonSize: 48,
-    placement: FLOATING_SCROLL_DEFAULT_PLACEMENT
+    position: { x: 1, y: 0.5 }
   },
   floatingScrollDisabledSites: ["fav.ju.mp", "kio.ac", "pan.baidu.com", "kmcert.com"]
 };
 
 const FLOATING_SCROLL_MIN_SIZE = 20;
 const FLOATING_SCROLL_MAX_SIZE = 140;
+const FLOATING_SCROLL_MIN_SPEED = 0.25;
+const FLOATING_SCROLL_MAX_SPEED = 80;
 
-let siteSetting = null;
+let scrollSettings = null;
 let container = null;
 let scrollFrame = 0;
 let scrollSpeed = 0;
 let scrollAccumulator = 0;
 let scrollTarget = null;
 let lastScrollableElement = null;
+let lastFrameTime = 0;
+let isPositionEditing = false;
+let dragState = null;
 
 function normalizeHost(value) {
   return String(value || "")
@@ -103,48 +45,33 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, numberValue));
 }
 
-function normalizePlacement(value) {
-  return FLOATING_SCROLL_PLACEMENTS.has(value) ? value : FLOATING_SCROLL_DEFAULT_PLACEMENT;
-}
-
-function normalizeSiteSetting(value) {
-  const host = normalizeHost(value && value.host);
-  if (!host) {
-    return null;
-  }
-
+function normalizeScrollSettings(value) {
+  const defaultPosition = FLOATING_SCROLL_DEFAULT_SETTINGS.floatingScrollSettings.position;
   return {
-    host,
-    upSpeed: clampNumber(value.upSpeed, 0.25, 80, 40),
-    downSpeed: clampNumber(value.downSpeed, 0.25, 80, 1.5),
-    fastDownSpeed: clampNumber(value.fastDownSpeed, 0.25, 80, 20),
-    buttonSize: clampNumber(value.buttonSize, FLOATING_SCROLL_MIN_SIZE, FLOATING_SCROLL_MAX_SIZE, 64),
-    placement: normalizePlacement(value.placement)
-  };
-}
-
-function normalizeDefaultSiteSetting(value) {
-  return {
-    enabled: Boolean(value && value.enabled),
-    upSpeed: clampNumber(value && value.upSpeed, 0.25, 80, 40),
-    downSpeed: clampNumber(value && value.downSpeed, 0.25, 80, 2.5),
-    fastDownSpeed: clampNumber(value && value.fastDownSpeed, 0.25, 80, 25),
+    enabled: !value || value.enabled !== false,
     buttonSize: clampNumber(
       value && value.buttonSize,
       FLOATING_SCROLL_MIN_SIZE,
       FLOATING_SCROLL_MAX_SIZE,
-      48
+      FLOATING_SCROLL_DEFAULT_SETTINGS.floatingScrollSettings.buttonSize
     ),
-    placement: normalizePlacement(value && value.placement)
+    downSpeed: clampNumber(
+      value && value.downSpeed,
+      FLOATING_SCROLL_MIN_SPEED,
+      FLOATING_SCROLL_MAX_SPEED,
+      FLOATING_SCROLL_DEFAULT_SETTINGS.floatingScrollSettings.downSpeed
+    ),
+    fastDownSpeed: clampNumber(
+      value && value.fastDownSpeed,
+      FLOATING_SCROLL_MIN_SPEED,
+      FLOATING_SCROLL_MAX_SPEED,
+      FLOATING_SCROLL_DEFAULT_SETTINGS.floatingScrollSettings.fastDownSpeed
+    ),
+    position: {
+      x: clampNumber(value && value.position && value.position.x, 0, 1, defaultPosition.x),
+      y: clampNumber(value && value.position && value.position.y, 0, 1, defaultPosition.y)
+    }
   };
-}
-
-function normalizeSiteSettings(values) {
-  if (!Array.isArray(values)) {
-    return FLOATING_SCROLL_DEFAULT_SETTINGS.floatingScrollSites;
-  }
-
-  return values.map(normalizeSiteSetting).filter(Boolean);
 }
 
 function normalizeDisabledSites(values) {
@@ -175,12 +102,10 @@ function getScrollTop() {
 
 function getMaxScrollTop() {
   const scrollElement = getScrollElement();
-  const documentElement = document.documentElement;
-  const body = document.body;
   const scrollHeight = Math.max(
     scrollElement ? scrollElement.scrollHeight : 0,
-    documentElement ? documentElement.scrollHeight : 0,
-    body ? body.scrollHeight : 0
+    document.documentElement ? document.documentElement.scrollHeight : 0,
+    document.body ? document.body.scrollHeight : 0
   );
 
   return Math.max(0, scrollHeight - window.innerHeight);
@@ -251,11 +176,7 @@ function findBestScrollableElement(speed, excludedElement = null) {
   let bestScore = 0;
 
   for (const element of document.querySelectorAll("body *")) {
-    if (element === excludedElement) {
-      continue;
-    }
-
-    if (!isScrollableElement(element, speed)) {
+    if (element === excludedElement || !isScrollableElement(element, speed)) {
       continue;
     }
 
@@ -319,16 +240,7 @@ function scrollDocumentByAmount(scrollAmount) {
   const scrollElements = [getScrollElement(), document.documentElement, document.body].filter(
     (element, index, elements) => element && elements.indexOf(element) === index
   );
-  if (scrollElements.length === 0) {
-    return false;
-  }
-
-  const nextScrollTop = clampNumber(
-    beforeScrollTop + scrollAmount,
-    0,
-    getMaxScrollTop(),
-    beforeScrollTop
-  );
+  const nextScrollTop = clampNumber(beforeScrollTop + scrollAmount, 0, getMaxScrollTop(), beforeScrollTop);
   if (nextScrollTop === beforeScrollTop) {
     return false;
   }
@@ -401,31 +313,35 @@ function stopAutoScroll() {
   scrollSpeed = 0;
   scrollAccumulator = 0;
   scrollTarget = null;
+  lastFrameTime = 0;
 }
 
 function startAutoScroll(speed) {
   stopAutoScroll();
-  scrollSpeed = speed;
-  scrollTarget = findScrollTarget(speed);
+  scrollSpeed = clampNumber(speed, FLOATING_SCROLL_MIN_SPEED, FLOATING_SCROLL_MAX_SPEED, 0);
+  if (!scrollSpeed) {
+    return;
+  }
 
-  const tick = () => {
+  scrollTarget = findScrollTarget(scrollSpeed);
+
+  const tick = (timestamp) => {
     if (!scrollSpeed || isAtScrollLimit(scrollSpeed)) {
       stopAutoScroll();
       return;
     }
 
-    scrollAccumulator += scrollSpeed;
-    const scrollAmount = scrollAccumulator > 0 ? Math.floor(scrollAccumulator) : Math.ceil(scrollAccumulator);
+    const elapsed = lastFrameTime ? Math.min(100, timestamp - lastFrameTime) : 1000 / 60;
+    lastFrameTime = timestamp;
+    scrollAccumulator += scrollSpeed * (elapsed / (1000 / 60));
+    const scrollAmount = Math.floor(scrollAccumulator);
 
-    if (scrollAmount === 0) {
-      scrollFrame = window.requestAnimationFrame(tick);
-      return;
-    }
-
-    scrollAccumulator -= scrollAmount;
-    if (!scrollByAmount(scrollAmount)) {
-      stopAutoScroll();
-      return;
+    if (scrollAmount > 0) {
+      scrollAccumulator -= scrollAmount;
+      if (!scrollByAmount(scrollAmount)) {
+        stopAutoScroll();
+        return;
+      }
     }
 
     scrollFrame = window.requestAnimationFrame(tick);
@@ -434,45 +350,160 @@ function startAutoScroll(speed) {
   scrollFrame = window.requestAnimationFrame(tick);
 }
 
-function positionContainer() {
-  if (!container || !siteSetting) {
-    return;
+function scrollPageTo(top) {
+  stopAutoScroll();
+  const targetTop = Math.round(clampNumber(top, 0, getMaxScrollTop(), 0));
+
+  try {
+    window.scrollTo({ top: targetTop, behavior: "smooth" });
+  } catch {
+    window.scrollTo(0, targetTop);
+  }
+}
+
+function getContainerBounds() {
+  if (!container) {
+    return null;
   }
 
   const rect = container.getBoundingClientRect();
   const gap = 12;
   const maxLeft = Math.max(gap, window.innerWidth - rect.width - gap);
   const maxTop = Math.max(gap, window.innerHeight - rect.height - gap);
-  const centerLeft = Math.round((window.innerWidth - rect.width) / 2);
-  const centerTop = Math.round((window.innerHeight - rect.height) / 2);
-
-  const positions = {
-    "top-left": { left: gap, top: gap },
-    "top-center": { left: centerLeft, top: gap },
-    "top-right": { left: maxLeft, top: gap },
-    "middle-left": { left: gap, top: centerTop },
-    "middle-right": { left: maxLeft, top: centerTop },
-    "bottom-left": { left: gap, top: maxTop },
-    "bottom-center": { left: centerLeft, top: maxTop },
-    "bottom-right": { left: maxLeft, top: maxTop }
+  return {
+    gap,
+    maxLeft,
+    maxTop,
+    rangeX: Math.max(0, maxLeft - gap),
+    rangeY: Math.max(0, maxTop - gap)
   };
-
-  const position = positions[siteSetting.placement] || positions[FLOATING_SCROLL_DEFAULT_PLACEMENT];
-  container.style.left = Math.round(clampNumber(position.left, gap, maxLeft, gap)) + "px";
-  container.style.top = Math.round(clampNumber(position.top, gap, maxTop, gap)) + "px";
 }
 
-function handleButtonActivation(event, speed) {
+function positionContainer() {
+  if (!container || !scrollSettings) {
+    return;
+  }
+
+  const bounds = getContainerBounds();
+  if (!bounds) {
+    return;
+  }
+
+  const position = scrollSettings.position;
+  const left = bounds.gap + bounds.rangeX * position.x;
+  const top = bounds.gap + bounds.rangeY * position.y;
+  container.style.left = Math.round(left) + "px";
+  container.style.top = Math.round(top) + "px";
+}
+
+function persistPosition() {
+  if (!scrollSettings) {
+    return;
+  }
+
+  chrome.storage.sync.set({ floatingScrollSettings: scrollSettings }, () => {
+    // Ignore transient page-unload and extension-reload errors.
+    void chrome.runtime.lastError;
+  });
+}
+
+function setPositionEditing(enabled) {
+  isPositionEditing = Boolean(enabled && container && scrollSettings);
+  if (!container) {
+    return false;
+  }
+
+  const finishButton = container.querySelector("[data-nyankat-position-finish]");
+  container.style.cursor = isPositionEditing ? "move" : "";
+  container.style.outline = isPositionEditing ? "2px solid #60a5fa" : "";
+  container.style.outlineOffset = isPositionEditing ? "4px" : "";
+  container.title = isPositionEditing ? "드래그해서 위치를 조정하세요." : "";
+
+  if (isPositionEditing && !finishButton) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "완료";
+    button.title = "위치 조정 완료";
+    button.setAttribute("data-nyankat-position-finish", "true");
+    button.style.cssText = [
+      "background:#2563eb",
+      "border:1px solid rgba(255,255,255,.55)",
+      "border-radius:6px",
+      "bottom:calc(100% + 8px)",
+      "color:white",
+      "cursor:pointer",
+      "font:600 12px system-ui,sans-serif",
+      "padding:5px 8px",
+      "position:absolute",
+      "right:0"
+    ].join(";");
+    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPositionEditing(false);
+    });
+    container.append(button);
+  } else if (!isPositionEditing && finishButton) {
+    finishButton.remove();
+  }
+
+  return isPositionEditing;
+}
+
+function beginPositionDrag(event) {
+  if (!isPositionEditing || !container || event.button !== 0) {
+    return;
+  }
+
+  const rect = container.getBoundingClientRect();
+  dragState = {
+    pointerId: event.pointerId,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top
+  };
   event.preventDefault();
-  event.stopPropagation();
-  startAutoScroll(speed);
+  container.setPointerCapture(event.pointerId);
 }
 
-function createButton(label, title, speed) {
+function movePositionDrag(event) {
+  if (!dragState || !container || event.pointerId !== dragState.pointerId || !scrollSettings) {
+    return;
+  }
+
+  const bounds = getContainerBounds();
+  if (!bounds) {
+    return;
+  }
+
+  const left = clampNumber(event.clientX - dragState.offsetX, bounds.gap, bounds.maxLeft, bounds.gap);
+  const top = clampNumber(event.clientY - dragState.offsetY, bounds.gap, bounds.maxTop, bounds.gap);
+  scrollSettings.position = {
+    x: bounds.rangeX ? (left - bounds.gap) / bounds.rangeX : 0,
+    y: bounds.rangeY ? (top - bounds.gap) / bounds.rangeY : 0
+  };
+  positionContainer();
+  event.preventDefault();
+}
+
+function endPositionDrag(event) {
+  if (!dragState || event.pointerId !== dragState.pointerId) {
+    return;
+  }
+
+  if (container && container.hasPointerCapture(event.pointerId)) {
+    container.releasePointerCapture(event.pointerId);
+  }
+  dragState = null;
+  persistPosition();
+}
+
+function createButton(label, title, action) {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = label;
   button.title = title;
+  button.setAttribute("aria-label", title);
   button.style.cssText = [
     "align-items:center",
     "background:rgba(20,20,20,.84)",
@@ -483,20 +514,29 @@ function createButton(label, title, speed) {
     "cursor:pointer",
     "display:flex",
     "font-family:'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif",
-    "font-size:" + Math.max(14, Math.round(siteSetting.buttonSize * 0.58)) + "px",
-    "height:" + siteSetting.buttonSize + "px",
+    "font-size:" + Math.max(14, Math.round(scrollSettings.buttonSize * 0.58)) + "px",
+    "height:" + scrollSettings.buttonSize + "px",
     "justify-content:center",
     "line-height:1",
     "padding:0",
     "touch-action:none",
-    "width:" + siteSetting.buttonSize + "px"
+    "width:" + scrollSettings.buttonSize + "px"
   ].join(";");
 
   button.addEventListener("pointerdown", (event) => {
+    if (isPositionEditing) {
+      return;
+    }
     event.stopPropagation();
   });
-
-  button.addEventListener("click", (event) => handleButtonActivation(event, speed));
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isPositionEditing) {
+      return;
+    }
+    action();
+  });
 
   return button;
 }
@@ -518,25 +558,25 @@ function removeContainer() {
     container.remove();
     container = null;
   }
-
 }
 
 function renderContainer() {
-  if (!siteSetting || !document.documentElement) {
+  if (!scrollSettings || !document.documentElement) {
     removeContainer();
     return;
   }
 
   removeContainer();
-  const isHorizontal = FLOATING_SCROLL_HORIZONTAL_PLACEMENTS.has(siteSetting.placement);
+  const size = scrollSettings.buttonSize;
+  const wasPositionEditing = isPositionEditing;
   container = document.createElement("div");
   container.setAttribute("data-nyankat-floating-scroll", "true");
+  container.setAttribute("aria-label", "자동 스크롤 버튼");
   container.style.cssText = [
     "display:grid",
     "gap:6px",
-    "grid-auto-flow:" + (isHorizontal ? "column" : "row"),
-    "grid-template-columns:" + (isHorizontal ? "repeat(3, " + siteSetting.buttonSize + "px)" : siteSetting.buttonSize + "px"),
-    "grid-template-rows:" + (isHorizontal ? siteSetting.buttonSize + "px" : "repeat(3, " + siteSetting.buttonSize + "px)"),
+    "grid-template-columns:repeat(2, " + size + "px)",
+    "grid-template-rows:repeat(2, " + size + "px)",
     "position:fixed",
     "z-index:2147483647",
     "user-select:none",
@@ -544,34 +584,36 @@ function renderContainer() {
   ].join(";");
 
   container.append(
-    createButton("⏫", "빠르게 위로 스크롤", -siteSetting.upSpeed),
-    createButton("🔽", "아래로 스크롤", siteSetting.downSpeed),
-    createButton("⏬", "빠르게 아래로 스크롤", siteSetting.fastDownSpeed)
+    createButton("🔽", "아래로 자동 스크롤", () => startAutoScroll(scrollSettings.downSpeed)),
+    createButton("⬆️", "페이지 최상단으로 이동", () => scrollPageTo(0)),
+    createButton("⏬", "빠르게 아래로 자동 스크롤", () => startAutoScroll(scrollSettings.fastDownSpeed)),
+    createButton("⬇️", "페이지 90% 지점으로 이동", () => scrollPageTo(getMaxScrollTop() * 0.9))
   );
+  container.addEventListener("pointerdown", beginPositionDrag);
+  container.addEventListener("pointermove", movePositionDrag);
+  container.addEventListener("pointerup", endPositionDrag);
+  container.addEventListener("pointercancel", endPositionDrag);
 
   document.documentElement.append(container);
   positionContainer();
+  setPositionEditing(wasPositionEditing);
 }
 
 function applySettings(settings) {
   const currentHost = location.hostname.toLowerCase();
   const disabledSites = normalizeDisabledSites(settings.floatingScrollDisabledSites);
   if (disabledSites.some((host) => matchesHost(currentHost, host))) {
-    siteSetting = null;
+    scrollSettings = null;
+    isPositionEditing = false;
     renderContainer();
     return;
   }
 
-  const sites = normalizeSiteSettings(settings.floatingScrollSites);
-  const exactSiteSetting = sites.find((site) => matchesHost(currentHost, site.host));
-  if (exactSiteSetting) {
-    siteSetting = exactSiteSetting;
-    renderContainer();
-    return;
+  const normalizedSettings = normalizeScrollSettings(settings.floatingScrollSettings);
+  scrollSettings = normalizedSettings.enabled ? normalizedSettings : null;
+  if (!scrollSettings) {
+    isPositionEditing = false;
   }
-
-  const defaultSiteSetting = normalizeDefaultSiteSetting(settings.floatingScrollDefault);
-  siteSetting = defaultSiteSetting.enabled ? defaultSiteSetting : null;
   renderContainer();
 }
 
@@ -582,12 +624,25 @@ function init() {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (
     areaName !== "sync" ||
-    (!changes.floatingScrollSites && !changes.floatingScrollDefault && !changes.floatingScrollDisabledSites)
+    (!changes.floatingScrollSettings && !changes.floatingScrollDisabledSites)
   ) {
     return;
   }
 
   chrome.storage.sync.get(FLOATING_SCROLL_DEFAULT_SETTINGS, applySettings);
+});
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || message.type !== "NYANKAT_FLOATING_SCROLL_SET_POSITION_MODE") {
+    return;
+  }
+
+  const enabled = setPositionEditing(message.enabled === true);
+  sendResponse({
+    ok: enabled || message.enabled !== true,
+    enabled,
+    reason: enabled || message.enabled !== true ? undefined : "button_not_available"
+  });
 });
 
 window.addEventListener("mousedown", (event) => {
@@ -599,13 +654,7 @@ window.addEventListener("mousedown", (event) => {
 window.addEventListener("wheel", rememberScrollableElement, { capture: true, passive: true });
 window.addEventListener("keydown", stopAutoScroll, true);
 window.addEventListener("blur", stopAutoScroll, true);
-window.addEventListener("resize", () => {
-  if (!container) {
-    return;
-  }
-
-  positionContainer();
-});
+window.addEventListener("resize", positionContainer);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     stopAutoScroll();

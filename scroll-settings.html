@@ -3,109 +3,56 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>사이트별 플로팅 스크롤 버튼 설정</title>
+    <title>플로팅 자동 스크롤 버튼 설정</title>
     <link rel="stylesheet" href="scroll-settings.css">
   </head>
   <body>
     <header>
       <img src="icon48.png" alt="" width="36" height="36">
       <div>
-        <h1>사이트별 플로팅 스크롤 버튼</h1>
-        <p>사이트별 버튼, 기본 버튼, 미사용 사이트를 설정합니다.</p>
+        <h1>플로팅 자동 스크롤 버튼</h1>
+        <p>모든 사이트에 공통으로 적용됩니다.</p>
       </div>
     </header>
 
     <main>
-      <section class="settings-section" aria-labelledby="defaultSettingsTitle">
-        <h2 id="defaultSettingsTitle">목록에 없는 사이트</h2>
-        <article class="default-row">
+      <section class="settings-section" aria-labelledby="scrollSettingsTitle">
+        <h2 id="scrollSettingsTitle">자동 스크롤 설정</h2>
+        <article class="settings-card">
           <label class="checkbox-label">
-            <input id="defaultEnabled" type="checkbox">
-            <span>기본적으로 스크롤 버튼 사용</span>
+            <input id="enabled" type="checkbox">
+            <span>자동 스크롤 버튼 사용</span>
           </label>
-          <div id="defaultControls" class="default-controls">
+
+          <div id="scrollControls" class="control-grid">
             <label>
-              <span>⏫ 속도</span>
-              <input id="defaultUpSpeed" type="number" min="0.25" max="80" step="0.25">
+              <span>버튼 크기</span>
+              <input id="buttonSize" type="number" min="20" max="140" step="1">
             </label>
             <label>
               <span>🔽 속도</span>
-              <input id="defaultDownSpeed" type="number" min="0.25" max="80" step="0.25">
+              <input id="downSpeed" type="number" min="0.25" max="80" step="0.25">
             </label>
             <label>
               <span>⏬ 속도</span>
-              <input id="defaultFastDownSpeed" type="number" min="0.25" max="80" step="0.25">
-            </label>
-            <label>
-              <span>버튼 크기</span>
-              <input id="defaultButtonSize" type="number" min="20" max="140" step="1">
-            </label>
-            <label>
-              <span>버튼 위치</span>
-              <select id="defaultPlacement"></select>
+              <input id="fastDownSpeed" type="number" min="0.25" max="80" step="0.25">
             </label>
           </div>
-        </article>
-      </section>
 
-      <section class="settings-section" aria-labelledby="siteSettingsTitle">
-        <h2 id="siteSettingsTitle">사이트별 플로팅 스크롤 버튼</h2>
-        <section id="siteList" aria-label="사이트 설정 목록"></section>
-        <div class="actions">
-          <button id="addSite" type="button">사이트 추가</button>
-          <span id="status" aria-live="polite">저장됨</span>
-        </div>
+          <p class="hint">버튼은 화면 오른쪽 중앙에 2×2로 표시됩니다. ⬆️는 최상단, ⬇️는 페이지 90% 지점으로 이동합니다.</p>
+        </article>
       </section>
 
       <section class="settings-section" aria-labelledby="disabledSitesTitle">
         <h2 id="disabledSitesTitle">자동 스크롤 버튼을 사용하지 않는 사이트</h2>
-        <section id="disabledSiteList" aria-label="미사용 사이트 목록"></section>
-        <div class="actions">
-          <button id="addDisabledSite" type="button">미사용 사이트 추가</button>
-        </div>
+        <label class="textarea-label" for="disabledSites">
+          <span>한 줄에 사이트 주소 하나씩 입력하세요.</span>
+          <textarea id="disabledSites" rows="8" placeholder="example.com&#10;sub.example.com"></textarea>
+        </label>
       </section>
     </main>
 
-    <template id="siteTemplate">
-      <article class="site-row">
-        <label>
-          <span>사이트 주소</span>
-          <input class="host" type="text" placeholder="example.com">
-        </label>
-        <label>
-          <span>버튼 위치</span>
-          <select class="placement"></select>
-        </label>
-        <label>
-          <span>⏫ 속도</span>
-          <input class="upSpeed" type="number" min="0.25" max="80" step="0.25">
-        </label>
-        <label>
-          <span>🔽 속도</span>
-          <input class="downSpeed" type="number" min="0.25" max="80" step="0.25">
-        </label>
-        <label>
-          <span>⏬ 속도</span>
-          <input class="fastDownSpeed" type="number" min="0.25" max="80" step="0.25">
-        </label>
-        <label>
-          <span>버튼 크기</span>
-          <input class="buttonSize" type="number" min="20" max="140" step="1">
-        </label>
-        <button class="remove" type="button" title="삭제">삭제</button>
-      </article>
-    </template>
-
-    <template id="disabledSiteTemplate">
-      <article class="disabled-site-row">
-        <label>
-          <span>사이트 주소</span>
-          <input class="disabledHost" type="text" placeholder="example.com">
-        </label>
-        <button class="remove" type="button" title="삭제">삭제</button>
-      </article>
-    </template>
-
+    <footer id="status" aria-live="polite">저장됨</footer>
     <script src="scroll-settings.js"></script>
   </body>
 </html>

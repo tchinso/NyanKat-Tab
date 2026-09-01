@@ -15,33 +15,133 @@
       </div>
     </header>
 
+    <nav class="tab-list" role="tablist" aria-label="설정 탭">
+      <button id="basicTab" class="tab-button" type="button" role="tab" aria-selected="true" aria-controls="basicPanel">기본</button>
+      <button id="subtitleTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="subtitlePanel">자막</button>
+    </nav>
+
     <main>
-      <label class="toggle-row" for="sendZeroOnYouTube">
-        <span>
-          <strong>YouTube 0 입력</strong>
-          <small>watch 페이지 로드 후 영상 시작 위치를 처음으로 보냅니다.</small>
-        </span>
-        <input id="sendZeroOnYouTube" type="checkbox">
-      </label>
+      <section id="basicPanel" class="tab-panel" role="tabpanel" aria-labelledby="basicTab">
+        <label class="toggle-row" for="sendZeroOnYouTube">
+          <span>
+            <strong>YouTube 0 입력</strong>
+            <small>watch 페이지 로드 후 영상 시작 위치를 처음으로 보냅니다.</small>
+          </span>
+          <input id="sendZeroOnYouTube" type="checkbox">
+        </label>
 
-      <label class="toggle-row" for="enableKoneBase64AutoDecode">
-        <span>
-          <strong>kone.gg Base64 자동 디코딩</strong>
-          <small>감지된 Base64를 자동으로 디코딩하고 링크/복사/원문 확인을 표시합니다.</small>
-        </span>
-        <input id="enableKoneBase64AutoDecode" type="checkbox">
-      </label>
+        <label class="toggle-row" for="enableKoneBase64AutoDecode">
+          <span>
+            <strong>kone.gg Base64 자동 디코딩</strong>
+            <small>감지된 Base64를 자동으로 디코딩하고 링크/복사/원문 확인을 표시합니다.</small>
+          </span>
+          <input id="enableKoneBase64AutoDecode" type="checkbox">
+        </label>
 
-      <button id="openScrollSettings" class="link-button" type="button">
-        사이트별 플로팅 스크롤 버튼 설정 열기
-      </button>
+        <button id="openScrollSettings" class="link-button" type="button">
+          플로팅 자동 스크롤 버튼 설정 열기
+        </button>
 
-      <button id="openKioDownload" class="link-button" type="button">
-        kio.ac 다운로드 상태 열기
-      </button>
+        <button id="openScrollPositionMode" class="link-button" type="button">
+          스크롤 버튼 위치 조정 모드 시작
+        </button>
+
+        <button id="openKioDownload" class="link-button" type="button">
+          kio.ac 다운로드 상태 열기
+        </button>
+
+        <footer id="status" aria-live="polite">저장됨</footer>
+      </section>
+
+      <section id="subtitlePanel" class="tab-panel subtitle-panel" role="tabpanel" aria-labelledby="subtitleTab" hidden>
+        <div class="subtitle-heading">
+          <h2>자막 오버레이</h2>
+          <p>현재 페이지와 iframe에서 찾은 동영상에 로컬 자막을 겹쳐 표시합니다.</p>
+        </div>
+
+        <div class="subtitle-row">
+          <label for="videoSelect">대상 동영상</label>
+          <select id="videoSelect"></select>
+          <button id="refreshVideos" class="icon-button" type="button" title="동영상 다시 검색" aria-label="동영상 다시 검색">↻</button>
+        </div>
+
+        <div class="subtitle-row file-row">
+          <label for="subtitleFile">자막 파일</label>
+          <input id="subtitleFile" type="file" accept=".srt,.ass,.ssa,.smi,.sami,.txt">
+        </div>
+
+        <div class="subtitle-row">
+          <label for="subtitleEncoding">인코딩</label>
+          <select id="subtitleEncoding">
+            <option value="auto">자동 감지 (권장)</option>
+            <option value="utf-8">UTF-8</option>
+            <option value="utf-16le">UTF-16LE</option>
+            <option value="utf-16be">UTF-16BE</option>
+            <option value="euc-kr">EUC-KR / CP949 호환</option>
+            <option value="windows-1252">Latin-1 (비권장)</option>
+          </select>
+        </div>
+
+        <div class="subtitle-row sync-row">
+          <label for="subtitleOffset">자막 싱크</label>
+          <div class="sync-controls">
+            <div class="offset-value">
+              <input id="subtitleOffset" type="number" value="0" step="250" aria-describedby="offsetHint">
+              <span>ms</span>
+            </div>
+            <div class="sync-buttons" aria-label="자막 싱크 조정">
+              <button type="button" data-offset-adjust="-10000">−10초</button>
+              <button type="button" data-offset-adjust="-1000">−1초</button>
+              <button type="button" data-offset-adjust="-250">−0.25초</button>
+              <button type="button" data-offset-adjust="250">+0.25초</button>
+              <button type="button" data-offset-adjust="1000">+1초</button>
+              <button type="button" data-offset-adjust="10000">+10초</button>
+            </div>
+            <small id="offsetHint">−는 자막을 앞당기고, +는 늦춥니다.</small>
+          </div>
+        </div>
+
+        <div class="subtitle-actions">
+          <button id="loadSubtitle" class="primary-button" type="button">자막 적용</button>
+          <button id="unloadSubtitle" type="button">자막 제거</button>
+        </div>
+
+        <hr>
+
+        <h3>스타일</h3>
+        <div class="subtitle-row">
+          <label for="subtitleFont">폰트</label>
+          <input id="subtitleFont" type="text" value='"Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif'>
+        </div>
+        <div class="subtitle-row">
+          <label for="subtitleFontSize">크기 (px)</label>
+          <input id="subtitleFontSize" type="number" min="10" max="120" value="48">
+        </div>
+        <div class="subtitle-row compact-row">
+          <label for="subtitleColor">글자색</label>
+          <input id="subtitleColor" type="color" value="#ffffff">
+          <label for="subtitleBackgroundColor">배경색</label>
+          <input id="subtitleBackgroundColor" type="color" value="#000000">
+        </div>
+        <div class="subtitle-row">
+          <label for="subtitleBackgroundOpacity">배경 투명도</label>
+          <input id="subtitleBackgroundOpacity" type="range" min="0" max="1" step="0.01" value="0.8">
+          <output id="subtitleBackgroundOpacityValue" for="subtitleBackgroundOpacity">0.8</output>
+        </div>
+        <label class="subtitle-checkbox" for="subtitleTextShadow">
+          <input id="subtitleTextShadow" type="checkbox" checked>
+          <span>텍스트 그림자 (가독성)</span>
+        </label>
+        <label class="subtitle-checkbox" for="subtitleVisible">
+          <input id="subtitleVisible" type="checkbox" checked>
+          <span>자막 보이기</span>
+        </label>
+
+        <p id="subtitleStatus" class="subtitle-status" aria-live="polite">동영상을 다시 검색해 선택하세요.</p>
+      </section>
     </main>
 
-    <footer id="status" aria-live="polite">저장됨</footer>
     <script src="popup.js"></script>
+    <script src="subtitle-popup.js"></script>
   </body>
 </html>
