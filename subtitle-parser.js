@@ -35,37 +35,46 @@
     return hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
   }
 
-  function escapeHtml(value) {
-    return String(value || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+  function decodeHtmlEntities(value) {
+    const named = {
+      amp: "&",
+      apos: "'",
+      gt: ">",
+      lt: "<",
+      nbsp: " ",
+      quot: '"'
+    };
+
+    return value.replace(/&(#(?:x[\da-f]+|\d+)|amp|apos|gt|lt|nbsp|quot);/gi, (entity, reference) => {
+      if (reference[0] !== "#") {
+        return named[reference.toLowerCase()];
+      }
+
+      const hexadecimal = reference[1].toLowerCase() === "x";
+      const codePoint = Number.parseInt(reference.slice(hexadecimal ? 2 : 1), hexadecimal ? 16 : 10);
+      return codePoint > 0 && codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+        ? String.fromCodePoint(codePoint)
+        : entity;
+    });
   }
 
   function sanitizeCueMarkup(value) {
-    const preservedTags = [];
-    let source = String(value || "")
+    const source = decodeHtmlEntities(String(value || ""))
       .replace(/\r/g, "")
       .replace(/\\[Nn]/g, "\n")
-      .replace(/&nbsp;/gi, " ");
+      .replace(/\\h/g, " ")
+      .replace(/\{\\[^}]*\}/g, "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+      .replace(/<\s*br\b[^>]*>/gi, "\n")
+      .replace(/<\/?[a-z][^>]*>|<\d{2}:\d{2}(?::\d{2})?\.\d{3}>|<[!?][^>]*>/gi, "");
 
-    source = source.replace(/<\s*(\/?)\s*(br|i|b|u)\b[^>]*>/gi, (_match, closing, tagName) => {
-      const tag = tagName.toLowerCase();
-      const normalized = tag === "br" ? "<br>" : "<" + (closing ? "/" : "") + tag + ">";
-      const marker = "\uE000" + preservedTags.length + "\uE001";
-      preservedTags.push(normalized);
-      return marker;
-    });
-    source = source.replace(/<[^>]*>/g, "");
-
-    return escapeHtml(source)
-      .replace(/\n/g, "<br>")
-      .replace(/\uE000(\d+)\uE001/g, (_match, index) => preservedTags[Number(index)] || "");
+    return source;
   }
 
   function parseSrt(text) {
     const cues = [];
-    const blocks = String(text || "").replace(/\r/g, "").split(/\n{2,}/);
+    const blocks = String(text || "").replace(/^\uFEFF/, "").replace(/\r/g, "").split(/\n{2,}/);
 
     for (const block of blocks) {
       const lines = block.trim().split("\n");
@@ -86,6 +95,59 @@
 
       const start = parseSrtTime(match[1]);
       const end = parseSrtTime(match[2].replace(/\s+.*/, ""));
+      if (start === null || end === null || end < start) {
+        continue;
+      }
+
+      cues.push({
+        start,
+        end,
+        text: sanitizeCueMarkup(lines.slice(timelineIndex + 1).join("\n"))
+      });
+    }
+
+    return cues.sort((first, second) => first.start - second.start);
+  }
+
+  function parseVttTime(value) {
+    const match = String(value || "").trim().match(/^(\d+):(\d{2})(?::(\d{2}))?\.(\d{3})$/);
+    if (!match) {
+      return null;
+    }
+
+    const first = Number(match[1]);
+    const second = Number(match[2]);
+    const hasHours = match[3] !== undefined;
+    const seconds = hasHours ? Number(match[3]) : second;
+    if (seconds > 59 || (hasHours && second > 59)) {
+      return null;
+    }
+
+    return (hasHours ? first * 3600 + second * 60 : first * 60) + seconds + Number(match[4]) / 1000;
+  }
+
+  function parseVtt(text) {
+    const cues = [];
+    const blocks = String(text || "")
+      .replace(/^\uFEFF/, "")
+      .replace(/\r/g, "")
+      .split(/\n[\t ]*\n+/);
+
+    for (const block of blocks) {
+      const lines = block.trim().split("\n");
+      if (/^(?:WEBVTT(?:\s|$)|NOTE(?:\s|$)|STYLE\s*$|REGION\s*$)/i.test(lines[0])) {
+        continue;
+      }
+
+      const timelineIndex = lines[0].includes("-->") ? 0 : 1;
+      const timeline = lines[timelineIndex] || "";
+      const match = timeline.match(/^\s*(\S+)\s*-->\s*(\S+)(?:\s+.*)?$/);
+      if (!match || lines.length <= timelineIndex + 1) {
+        continue;
+      }
+
+      const start = parseVttTime(match[1]);
+      const end = parseVttTime(match[2]);
       if (start === null || end === null || end < start) {
         continue;
       }
@@ -175,7 +237,7 @@
         continue;
       }
 
-      const cueText = String(fields[textIndex] || "").replace(/\{\\[^}]*\}/g, "");
+      const cueText = String(fields[textIndex] || "");
       cues.push({ start, end, text: sanitizeCueMarkup(cueText) });
     }
 
@@ -186,6 +248,9 @@
     const lower = String(filename || "").toLowerCase();
     if (lower.endsWith(".srt")) {
       return "srt";
+    }
+    if (lower.endsWith(".vtt")) {
+      return "vtt";
     }
     if (lower.endsWith(".ass") || lower.endsWith(".ssa")) {
       return "ass";
@@ -201,6 +266,9 @@
     if (normalizedFormat === "srt") {
       return parseSrt(text);
     }
+    if (normalizedFormat === "vtt" || normalizedFormat === "webvtt") {
+      return parseVtt(text);
+    }
     if (normalizedFormat === "ass" || normalizedFormat === "ssa") {
       return parseAss(text);
     }
@@ -208,7 +276,10 @@
       return parseSmi(text);
     }
 
-    const source = String(text || "");
+    const source = String(text || "").replace(/^\uFEFF/, "");
+    if (/^WEBVTT(?:\s|$)/i.test(source) || /^\s*\d+:\d{2}\.\d{3}\s*-->/m.test(source)) {
+      return parseVtt(source);
+    }
     if (/^\s*\d+\s*\n\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->/m.test(source)) {
       return parseSrt(source);
     }
@@ -226,6 +297,7 @@
     parse,
     parseAss,
     parseSmi,
-    parseSrt
+    parseSrt,
+    parseVtt
   });
 })();

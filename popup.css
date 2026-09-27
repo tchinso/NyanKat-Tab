@@ -222,14 +222,14 @@ footer {
 
 .sync-buttons {
   display: grid;
-  gap: 5px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .sync-buttons button {
   font-size: 11px;
-  min-height: 31px;
-  padding: 4px;
+  min-height: 29px;
+  padding: 3px 2px;
 }
 
 .sync-controls small {
@@ -270,6 +270,11 @@ hr {
 .subtitle-row input[type="range"] {
   min-width: 0;
   width: 100%;
+}
+
+.subtitle-row output {
+  min-width: 42px;
+  text-align: right;
 }
 
 .subtitle-checkbox {

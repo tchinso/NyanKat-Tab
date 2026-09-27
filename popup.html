@@ -67,7 +67,7 @@
 
         <div class="subtitle-row file-row">
           <label for="subtitleFile">자막 파일</label>
-          <input id="subtitleFile" type="file" accept=".srt,.ass,.ssa,.smi,.sami,.txt">
+          <input id="subtitleFile" type="file" accept=".srt,.vtt,.ass,.ssa,.smi,.sami,.txt">
         </div>
 
         <div class="subtitle-row">
@@ -90,12 +90,12 @@
               <span>ms</span>
             </div>
             <div class="sync-buttons" aria-label="자막 싱크 조정">
-              <button type="button" data-offset-adjust="-10000">−10초</button>
-              <button type="button" data-offset-adjust="-1000">−1초</button>
-              <button type="button" data-offset-adjust="-250">−0.25초</button>
-              <button type="button" data-offset-adjust="250">+0.25초</button>
-              <button type="button" data-offset-adjust="1000">+1초</button>
-              <button type="button" data-offset-adjust="10000">+10초</button>
+              <button type="button" data-offset-adjust="-10000" aria-label="자막 10초 앞당기기">−10</button>
+              <button type="button" data-offset-adjust="-1000" aria-label="자막 1초 앞당기기">−1</button>
+              <button type="button" data-offset-adjust="-250" aria-label="자막 0.25초 앞당기기">−0.25</button>
+              <button type="button" data-offset-adjust="250" aria-label="자막 0.25초 늦추기">+0.25</button>
+              <button type="button" data-offset-adjust="1000" aria-label="자막 1초 늦추기">+1</button>
+              <button type="button" data-offset-adjust="10000" aria-label="자막 10초 늦추기">+10</button>
             </div>
             <small id="offsetHint">−는 자막을 앞당기고, +는 늦춥니다.</small>
           </div>
@@ -111,11 +111,19 @@
         <h3>스타일</h3>
         <div class="subtitle-row">
           <label for="subtitleFont">폰트</label>
-          <input id="subtitleFont" type="text" value='"Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif'>
+          <select id="subtitleFont">
+            <option value='"Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif'>기본값</option>
+          </select>
         </div>
         <div class="subtitle-row">
           <label for="subtitleFontSize">크기 (px)</label>
-          <input id="subtitleFontSize" type="number" min="10" max="120" value="48">
+          <input id="subtitleFontSize" type="range" min="10" max="120" step="1" value="48">
+          <output id="subtitleFontSizeValue" for="subtitleFontSize">48 px</output>
+        </div>
+        <div class="subtitle-row">
+          <label for="subtitleVerticalPosition">세로 위치</label>
+          <input id="subtitleVerticalPosition" type="range" min="0" max="100" step="1" value="100" title="0% 위쪽, 100% 아래쪽">
+          <output id="subtitleVerticalPositionValue" for="subtitleVerticalPosition">100%</output>
         </div>
         <div class="subtitle-row compact-row">
           <label for="subtitleColor">글자색</label>

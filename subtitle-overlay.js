@@ -10,6 +10,7 @@
   const DEFAULT_STYLE = {
     font: '"Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif',
     fontSize: 48,
+    verticalPosition: 100,
     color: "#ffffff",
     bgColor: "#000000",
     bgOpacity: 0.8,
@@ -44,6 +45,7 @@
     return {
       font: font.slice(0, 500) || fallback.font,
       fontSize: clampNumber(value && value.fontSize, 10, 120, fallback.fontSize),
+      verticalPosition: clampNumber(value && value.verticalPosition, 0, 100, fallback.verticalPosition),
       color: normalizeColor(value && value.color, fallback.color),
       bgColor: normalizeColor(value && value.bgColor, fallback.bgColor),
       bgOpacity: clampNumber(value && value.bgOpacity, 0, 1, fallback.bgOpacity),
@@ -381,7 +383,20 @@
     if (typeof ResizeObserver === "function") {
       record.resizeObserver = new ResizeObserver(layout);
       record.resizeObserver.observe(record.video);
+      record.resizeObserver.observe(record.textBox);
     }
+  }
+
+  function positionSubtitleText(record) {
+    if (!record.overlay || !record.textBox || record.overlay.hidden) {
+      return;
+    }
+
+    const style = window.getComputedStyle(record.overlay);
+    const contentHeight = record.overlay.clientHeight -
+      Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom);
+    const availableHeight = Math.max(0, contentHeight - record.textBox.offsetHeight);
+    record.textBox.style.marginTop = Math.round(availableHeight * record.settings.verticalPosition / 100) + "px";
   }
 
   function applyStyle(record) {
@@ -398,6 +413,7 @@
       ? "0 0 6px rgba(0,0,0,.6), 0 0 2px rgba(0,0,0,.8)"
       : "none";
     record.overlay.hidden = !settings.visible;
+    positionSubtitleText(record);
   }
 
   function positionOverlay(record) {
@@ -439,6 +455,7 @@
       });
     }
     record.overlay.hidden = !record.settings.visible;
+    positionSubtitleText(record);
   }
 
   function scheduleOverlayLayout() {
@@ -487,7 +504,8 @@
     }
 
     record.currentCueIndex = cueIndex;
-    record.textBox.innerHTML = cueIndex === -1 ? "" : record.cues[cueIndex].text;
+    record.textBox.textContent = cueIndex === -1 ? "" : record.cues[cueIndex].text;
+    positionSubtitleText(record);
   }
 
   function stopCueUpdates(record) {
