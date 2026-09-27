@@ -7,12 +7,20 @@
   const MAX_MATCHES = 80;
   const MAX_TEXT_LENGTH = 700;
   const RESCAN_DELAYS = [0, 250, 1000, 2500, 5000, 10000];
+  const KIOSK_HELP_TITLES = new Set([
+    "Help us keep Kiosk running",
+    "Kiosk를 도와주세요",
+    "Kioskを支援してください",
+    "资助Kiosk持续运行",
+    "資助以維持 Kiosk 服務"
+  ]);
 
   if (!/(^|\.)kio\.ac$/i.test(location.hostname)) {
     return;
   }
 
   const observedRoots = new WeakSet();
+  const dismissedKioskHelpTooltips = new WeakSet();
   let observer = null;
   let scanTimer = 0;
   let lastSignature = "";
@@ -164,6 +172,36 @@
     }
   }
 
+  function dismissKioskHelpTooltips() {
+    for (const content of document.querySelectorAll('[data-slot="tooltip-content"]')) {
+      if (content.getAttribute("data-state") === "closed") {
+        dismissedKioskHelpTooltips.delete(content);
+        continue;
+      }
+
+      if (
+        dismissedKioskHelpTooltips.has(content) ||
+        !Array.from(content.querySelectorAll("p")).some((heading) =>
+          KIOSK_HELP_TITLES.has(normalizeText(heading.textContent))
+        )
+      ) {
+        continue;
+      }
+
+      const closeButton = Array.from(content.querySelectorAll("button")).find((button) =>
+        button.classList.contains("absolute") &&
+        button.classList.contains("-top-4") &&
+        button.classList.contains("-right-4") &&
+        button.querySelector("svg.lucide-x")
+      );
+      if (closeButton) {
+        dismissedKioskHelpTooltips.add(content);
+        // This popup ignores the tooltip's blur close path; its X button updates the page's open state.
+        closeButton.click();
+      }
+    }
+  }
+
   function scanTextNodes(root, matches, seen) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
@@ -265,6 +303,7 @@
   function scanAndReport() {
     unlockDisabledButtons(document);
     observeShadowRoots(document);
+    dismissKioskHelpTooltips();
 
     const matches = collectMatches();
     const signature =
@@ -349,6 +388,7 @@
       }
     }
 
+    dismissKioskHelpTooltips();
     scheduleScan();
   }
 
@@ -357,6 +397,7 @@
     observeRoot(document);
     unlockDisabledButtons(document);
     observeShadowRoots(document);
+    dismissKioskHelpTooltips();
 
     for (const delay of RESCAN_DELAYS) {
       window.setTimeout(() => {
