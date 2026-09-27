@@ -8,7 +8,7 @@ Chrome MV3 extension for:
 - decoding selected Base64 text from the `NyanKatX3 Tab` right-click menu, including up to three nested Base64 layers
 - automatically decoding detected Base64 text on `kone.gg`, with nested decoding, clickable links, copy buttons, and original text reveal
 - showing floating auto-scroll buttons with configurable opacity and site exclusions
-- unlocking disabled `button` elements, resetting tooltip triggers from `instant-open` to `closed`, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
+- unlocking disabled `button` elements, closing newly opened tooltips, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
 - persisting the YouTube, kone.gg decoder, and floating scroll settings across browser restarts
 
 ## Permissions

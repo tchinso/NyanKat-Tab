@@ -331,7 +331,8 @@
           mutation.target.getAttribute("data-slot") === "tooltip-trigger" &&
           mutation.target.getAttribute("data-state") === "instant-open"
         ) {
-          mutation.target.setAttribute("data-state", "closed");
+          // Let the tooltip component close itself so its portaled content is removed too.
+          mutation.target.dispatchEvent(new FocusEvent("blur"));
         }
       }
 
