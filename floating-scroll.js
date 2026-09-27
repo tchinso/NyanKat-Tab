@@ -4,6 +4,7 @@ const FLOATING_SCROLL_DEFAULT_SETTINGS = {
   floatingScrollSettings: {
     enabled: true,
     buttonSize: 48,
+    opacity: 0.5,
     downSpeed: 2.5,
     fastDownSpeed: 25,
     position: { x: 1, y: 0.5 }
@@ -54,6 +55,12 @@ function normalizeScrollSettings(value) {
       FLOATING_SCROLL_MIN_SIZE,
       FLOATING_SCROLL_MAX_SIZE,
       FLOATING_SCROLL_DEFAULT_SETTINGS.floatingScrollSettings.buttonSize
+    ),
+    opacity: clampNumber(
+      value && value.opacity,
+      0,
+      1,
+      FLOATING_SCROLL_DEFAULT_SETTINGS.floatingScrollSettings.opacity
     ),
     downSpeed: clampNumber(
       value && value.downSpeed,
@@ -518,6 +525,7 @@ function createButton(label, title, action) {
     "height:" + scrollSettings.buttonSize + "px",
     "justify-content:center",
     "line-height:1",
+    "opacity:" + scrollSettings.opacity,
     "padding:0",
     "touch-action:none",
     "width:" + scrollSettings.buttonSize + "px"

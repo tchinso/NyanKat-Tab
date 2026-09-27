@@ -3,6 +3,7 @@
 const DEFAULT_SCROLL_SETTINGS = {
   enabled: true,
   buttonSize: 48,
+  opacity: 0.5,
   downSpeed: 2.5,
   fastDownSpeed: 25,
   position: { x: 1, y: 0.5 }
@@ -15,6 +16,7 @@ const DEFAULT_SETTINGS = {
 
 const enabledInput = document.querySelector("#enabled");
 const buttonSizeInput = document.querySelector("#buttonSize");
+const opacityInput = document.querySelector("#opacity");
 const downSpeedInput = document.querySelector("#downSpeed");
 const fastDownSpeedInput = document.querySelector("#fastDownSpeed");
 const disabledSitesInput = document.querySelector("#disabledSites");
@@ -46,6 +48,7 @@ function normalizeScrollSettings(value) {
   return {
     enabled: !value || value.enabled !== false,
     buttonSize: clampNumber(value && value.buttonSize, 20, 140, DEFAULT_SCROLL_SETTINGS.buttonSize),
+    opacity: clampNumber(value && value.opacity, 0, 1, DEFAULT_SCROLL_SETTINGS.opacity),
     downSpeed: clampNumber(value && value.downSpeed, 0.25, 80, DEFAULT_SCROLL_SETTINGS.downSpeed),
     fastDownSpeed: clampNumber(
       value && value.fastDownSpeed,
@@ -93,6 +96,7 @@ function collectSettings() {
   return normalizeScrollSettings({
     enabled: enabledInput.checked,
     buttonSize: buttonSizeInput.value,
+    opacity: opacityInput.value,
     downSpeed: downSpeedInput.value,
     fastDownSpeed: fastDownSpeedInput.value,
     position
@@ -121,6 +125,7 @@ function render(settings, disabledSites) {
   position = normalizedSettings.position;
   enabledInput.checked = normalizedSettings.enabled;
   buttonSizeInput.value = String(normalizedSettings.buttonSize);
+  opacityInput.value = String(normalizedSettings.opacity);
   downSpeedInput.value = String(normalizedSettings.downSpeed);
   fastDownSpeedInput.value = String(normalizedSettings.fastDownSpeed);
   disabledSitesInput.value = normalizeDisabledSites(disabledSites).join("\n");

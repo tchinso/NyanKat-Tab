@@ -294,6 +294,7 @@
 
     observer.observe(root, {
       attributes: true,
+      attributeOldValue: true,
       characterData: true,
       childList: true,
       subtree: true
@@ -323,6 +324,15 @@
     for (const mutation of mutations) {
       if (mutation.type === "attributes" && mutation.target instanceof HTMLButtonElement) {
         unlockButton(mutation.target);
+
+        if (
+          mutation.attributeName === "data-state" &&
+          mutation.oldValue === "closed" &&
+          mutation.target.getAttribute("data-slot") === "tooltip-trigger" &&
+          mutation.target.getAttribute("data-state") === "instant-open"
+        ) {
+          mutation.target.setAttribute("data-state", "closed");
+        }
       }
 
       if (mutation.type === "childList") {

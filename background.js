@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS = {
     downSpeed: 2.5,
     fastDownSpeed: 25,
     buttonSize: 48,
+    opacity: 0.5,
     position: { x: 1, y: 0.5 }
   },
   floatingScrollDisabledSites: ["fav.ju.mp", "kio.ac", "pan.baidu.com", "kmcert.com"]
