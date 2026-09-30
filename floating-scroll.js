@@ -3,13 +3,27 @@
 const FLOATING_SCROLL_DEFAULT_SETTINGS = {
   floatingScrollSettings: {
     enabled: true,
-    buttonSize: 48,
-    opacity: 0.5,
-    downSpeed: 2.5,
-    fastDownSpeed: 25,
+    buttonSize: 72,
+    opacity: 0.2,
+    downSpeed: 12.5,
+    fastDownSpeed: 37.5,
     position: { x: 1, y: 0.5 }
   },
-  floatingScrollDisabledSites: ["fav.ju.mp", "kio.ac", "pan.baidu.com", "kmcert.com"]
+  floatingScrollDisabledSites: [
+    "12tw.pages.dev",
+    "accounts.google.com",
+    "easysign.anyid.go.kr",
+    "fav.ju.mp",
+    "jp.pornhub.com",
+    "kio.ac",
+    "kmcert.com",
+    "localhost",
+    "nkmm.pages.dev",
+    "pan.baidu.com",
+    "tchinso.github.io",
+    "video.twimg.com",
+    "discord.com"
+  ]
 };
 
 const FLOATING_SCROLL_MIN_SIZE = 20;

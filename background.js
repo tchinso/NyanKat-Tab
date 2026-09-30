@@ -5,13 +5,27 @@ const DEFAULT_SETTINGS = {
   enableKoneBase64AutoDecode: true,
   floatingScrollSettings: {
     enabled: true,
-    downSpeed: 2.5,
-    fastDownSpeed: 25,
-    buttonSize: 48,
-    opacity: 0.5,
+    downSpeed: 12.5,
+    fastDownSpeed: 37.5,
+    buttonSize: 72,
+    opacity: 0.2,
     position: { x: 1, y: 0.5 }
   },
-  floatingScrollDisabledSites: ["fav.ju.mp", "kio.ac", "pan.baidu.com", "kmcert.com"]
+  floatingScrollDisabledSites: [
+    "12tw.pages.dev",
+    "accounts.google.com",
+    "easysign.anyid.go.kr",
+    "fav.ju.mp",
+    "jp.pornhub.com",
+    "kio.ac",
+    "kmcert.com",
+    "localhost",
+    "nkmm.pages.dev",
+    "pan.baidu.com",
+    "tchinso.github.io",
+    "video.twimg.com",
+    "discord.com"
+  ]
 };
 
 const OBSOLETE_SETTINGS = ["blockUpwardWheel", "mouseGestureAutoScrollMode", "autoScrollSpeed"];

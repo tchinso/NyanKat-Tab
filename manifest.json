@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NyanKatX3 Tab",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "New tab redirect, video subtitle overlay, Base64 decoding, floating auto-scroll, and local kio.ac download status.",
   "icons": {
     "16": "icon16.png",
