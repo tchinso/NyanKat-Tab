@@ -132,6 +132,7 @@ select {
 }
 
 .link-button,
+.download-track button,
 .subtitle-actions button,
 .sync-buttons button,
 .icon-button {
@@ -301,6 +302,41 @@ hr {
 
 button:hover {
   filter: brightness(1.05);
+}
+
+.download-tracks {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.download-track {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.download-track-info {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.download-track button {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 button:focus-visible,

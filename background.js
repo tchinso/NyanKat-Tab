@@ -1,5 +1,7 @@
 "use strict";
 
+importScripts("subtitle-extractor.js", "subtitle-downloads.js");
+
 const DEFAULT_SETTINGS = {
   sendZeroOnYouTube: true,
   enableKoneBase64AutoDecode: true,

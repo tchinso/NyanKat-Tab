@@ -1,0 +1,121 @@
+{
+  "observedAt": "2026-10-04",
+  "scope": "Live site/player observations and HTTP subtitle retrieval; not an installed-extension end-to-end test.",
+  "sites": [
+    {
+      "host": "anikototv.to",
+      "playerHost": "megaplay.buzz",
+      "status": "player-and-caption-menu-observed",
+      "mechanism": "Dynamically inserted cross-origin iframe; JW Player renders captions outside native textTracks. Eleven caption choices observed.",
+      "requirements": ["all-frame injection", "JW Player configuration/playlist discovery", "preserve player iframe referrer"],
+      "downloadVerified": false
+    },
+    {
+      "host": "reanime.to",
+      "playerHost": "flixcloud.cc",
+      "status": "subtitle-body-verified",
+      "mechanism": "Hydration inserts iframe. Inline player configuration has subtitles objects with url, language, format, default.",
+      "formats": ["ass", "srt"],
+      "subtitleCount": 11,
+      "verifiedBody": {"httpStatus": 200, "format": "ass", "dialogueCount": 369},
+      "notes": "Initial server-rendered no-streaming-servers message was transient; browser hydration succeeded."
+    },
+    {
+      "host": "www.miruro.cx",
+      "playerHost": "strm.cx",
+      "status": "subtitle-body-verified",
+      "mechanism": "strmcx-embed open shadow root contains iframe. Parent receives encoded binary source API response; decrypted track metadata transfers via MessagePort. Child iframe inserts native track elements.",
+      "subtitleCount": 11,
+      "requirements": ["all-frame injection", "shadow-root observation", "MessagePort messages", "native track discovery"],
+      "verifiedBody": {"httpStatus": 200, "contentType": "text/vtt", "format": "vtt", "cueCount": 369}
+    },
+    {
+      "host": "anizone.to",
+      "status": "subtitle-body-verified",
+      "mechanism": "Player data is JSON.parse of a JavaScript string embedded in x-data. Double escaped JSON quotes and slash escapes; subtitles array contains title, format, language, default, forced, file.",
+      "subtitleCount": 17,
+      "formats": ["ass", "srt"],
+      "requirements": ["decode player DOM attributes", "exclude storyboard/chapter VTT"],
+      "verifiedBodies": [
+        {"httpStatus": 200, "contentType": "application/octet-stream", "format": "ass", "dialogueCount": 369},
+        {"httpStatus": 200, "contentType": "application/octet-stream", "format": "srt", "cueCount": 405}
+      ]
+    },
+    {
+      "host": "kaa.lt",
+      "playerHost": "krussdomi.com",
+      "status": "subtitle-body-verified",
+      "mechanism": "Astro-island props encode subtitles as [1, [[0, {language:[0,value], name:[0,value], src:[0,url]}]]]. Hydrated player renders native subtitles.",
+      "requirements": ["decode HTML entities and tuple props", "preserve iframe referrer"],
+      "verifiedBody": {"httpStatus": 200, "contentType": "application/octet-stream", "format": "vtt", "cueCount": 366},
+      "notes": "Direct no-referrer fetch returned 403; same subtitle with krussdomi.com Referer and Origin returned 200."
+    },
+    {
+      "host": "anime.nexus",
+      "status": "live-validation-blocked",
+      "mechanism": "Static player source shows ASS track objects {id, src, label, srcLang, type}; lazy subtitle renderer uses subUrl and setTrackByUrl, with worker initialization. Browser navigated to google.com without interaction before subtitle capture.",
+      "requirements": ["ASS renderer Worker messages", "srcLang metadata", "subtitle network bodies"],
+      "downloadVerified": false,
+      "notes": "Public stream API request returned 403. Cause of browser navigation not established; no protection bypass attempted."
+    },
+    {
+      "host": "ani.pm",
+      "playerHost": "embed.settlar.io",
+      "status": "native-tracks-observed",
+      "mechanism": "Cross-origin iframe exposes English signs/songs track with empty src and English CC track with signed extensionless media.settlar.io/v1/object/v2... URL.",
+      "subtitleCount": 2,
+      "requirements": ["all-frame injection", "extensionless track URLs", "native/programmatic cue fallback"],
+      "downloadVerified": false,
+      "notes": "Live player captions enabled. Direct Node request to signed subtitle URL returned Cloudflare 403 even with iframe referrer."
+    },
+    {
+      "host": "www.animeonsen.xyz",
+      "status": "renderer-and-subtitle-selector-observed",
+      "mechanism": "Authenticated site XHR GET api.animeonsen.xyz/v4/content/<content>/video/<episode> returns data.uri.subtitles language-to-URL map. SubtitlesOctopus receives subUrl and renders ASS through a worker/canvas.",
+      "subtitleCount": 9,
+      "requirements": ["XHR JSON metadata capture", "language-to-URL maps", "Worker postMessage subtitle initialization"],
+      "downloadVerified": false,
+      "notes": "Native video has no caption tracks. Public HTTP request lacked anonymous site session and returned 401. No user credentials captured."
+    },
+    {
+      "host": "animex.one",
+      "playerHost": "plyr.animex.one",
+      "status": "subtitle-body-verified",
+      "mechanism": "Hydrated iframe inserts 13 native subtitle track elements. src is extensionless cdnx.aniwatchtv.site/uwu/<encoded-path>.",
+      "subtitleCount": 13,
+      "requirements": ["all-frame injection", "trust track semantics over extension", "sniff subtitle body over misleading MIME"],
+      "verifiedBody": {"httpStatus": 200, "contentType": "image/jpeg", "format": "vtt", "cueCount": 366},
+      "notes": "Initial unavailable-episode placeholder was transient; patient browser hydration succeeded."
+    },
+    {
+      "host": "lunarx.to",
+      "status": "live-validation-blocked",
+      "mechanism": "Browser reached episode loading screen, then navigated to about:blank before sources loaded. One fresh navigation repeated the result.",
+      "downloadVerified": false,
+      "notes": "Direct HTTP returned 403. Cause of browser navigation not established; no protection bypass attempted."
+    }
+  ],
+  "structuralFixtures": {
+    "flixcloudConfiguration": {
+      "subtitles": [
+        {"url": "https://cdn.example.test/subtitles/episode/english.ass", "language": "English (Track 3 (ENG))", "format": "ass", "default": true},
+        {"url": "https://cdn.example.test/subtitles/episode/english-cc.srt", "language": "English (CC)", "format": "srt", "default": false}
+      ]
+    },
+    "anizoneConfiguration": {
+      "src": "https://cdn.example.test/video/master.m3u8",
+      "storyboard": "https://cdn.example.test/video/storyboard.vtt",
+      "chapter": "https://cdn.example.test/video/chapters.vtt",
+      "subtitles": [{"title": "English", "format": "ass", "language": "en", "default": true, "forced": "no", "file": "https://cdn.example.test/video/subtitles/1_en.ass"}]
+    },
+    "astroTupleProperties": {
+      "subtitles": [1, [[0, {"language": [0, "eng"], "name": [0, "English"], "src": [0, "https://cdn.example.test/episode/english.vtt"]}]]]
+    },
+    "onsenResponse": {
+      "data": {"uri": {"stream": "https://cdn.example.test/video/manifest.mpd", "subtitles": {"en-US": "https://cdn.example.test/subtitles/english.ass", "de-DE": "https://cdn.example.test/subtitles/german.ass"}}}
+    },
+    "nexusSubtitleTrack": {"id": "english", "src": "https://cdn.example.test/episode/english.ass", "label": "English", "srcLang": "en", "type": "ass"},
+    "extensionlessNativeTrack": {"src": "https://cdn.example.test/v1/object/opaque-token", "kind": "subtitles", "label": "English CC (Dub)", "srclang": "en"},
+    "misleadingMimeSubtitle": {"url": "https://cdn.example.test/uwu/opaque-path", "contentType": "image/jpeg", "body": "WEBVTT\n\n00:00.000 --> 00:01.000\nSynthetic verification cue.\n"}
+  }
+}

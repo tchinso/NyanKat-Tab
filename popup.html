@@ -18,6 +18,7 @@
     <nav class="tab-list" role="tablist" aria-label="설정 탭">
       <button id="basicTab" class="tab-button" type="button" role="tab" aria-selected="true" aria-controls="basicPanel">기본</button>
       <button id="subtitleTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="subtitlePanel">자막</button>
+      <button id="downloadTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="downloadPanel">자막추출</button>
     </nav>
 
     <main>
@@ -141,9 +142,21 @@
 
         <p id="subtitleStatus" class="subtitle-status" aria-live="polite">동영상을 다시 검색해 선택하세요.</p>
       </section>
+
+      <section id="downloadPanel" class="tab-panel download-panel" role="tabpanel" aria-labelledby="downloadTab" hidden>
+        <div class="subtitle-heading">
+          <h2>감지된 자막 다운로드</h2>
+          <p>영상을 재생하고 사이트의 자막을 켜면 자막 목록이 자동으로 갱신됩니다.</p>
+        </div>
+        <button id="refreshDownloads" class="link-button" type="button">자막 다시 검색</button>
+        <p id="downloadEmpty">감지된 자막이 없습니다. 재생 페이지를 새로고침한 뒤 자막을 켜 보세요.</p>
+        <ul id="downloadTracks" class="download-tracks" aria-label="감지된 자막"></ul>
+        <p id="downloadStatus" class="subtitle-status" aria-live="polite"></p>
+      </section>
     </main>
 
     <script src="popup.js"></script>
     <script src="subtitle-popup.js"></script>
+    <script src="download-popup.js"></script>
   </body>
 </html>

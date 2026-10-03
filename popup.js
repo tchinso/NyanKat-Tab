@@ -91,7 +91,7 @@ chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
 
 for (const button of tabButtons) {
   button.addEventListener("click", () => {
-    showTab(button.id === "subtitleTab" ? "subtitle" : "basic");
+    showTab(button.id.replace(/Tab$/, ""));
   });
   button.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
@@ -102,7 +102,7 @@ for (const button of tabButtons) {
     const nextIndex = (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabButtons.length) % tabButtons.length;
     const nextButton = tabButtons[nextIndex];
     nextButton.focus();
-    showTab(nextButton.id === "subtitleTab" ? "subtitle" : "basic");
+    showTab(nextButton.id.replace(/Tab$/, ""));
   });
 }
 
