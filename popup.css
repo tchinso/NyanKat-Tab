@@ -161,6 +161,66 @@ footer {
   gap: 10px;
 }
 
+.subtitle-style-group {
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  min-width: 0;
+  padding: 10px;
+}
+
+.subtitle-style-group legend {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 5px;
+}
+
+.style-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.style-fields[hidden] {
+  display: none;
+}
+
+.subtitle-style-group .subtitle-row {
+  grid-template-columns: 82px minmax(0, 1fr) 56px;
+}
+
+.style-select select {
+  grid-column: 2 / -1;
+}
+
+.subtitle-style-group .color-row {
+  grid-template-columns: 82px 42px;
+}
+
+.subtitle-style-group .color-pair-row {
+  grid-template-columns: 82px 42px 72px 42px;
+}
+
+.subtitle-style-group input[type="color"] {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 5px;
+  cursor: pointer;
+  height: 30px;
+  padding: 2px;
+  width: 42px;
+}
+
+.subtitle-style-group .style-toggle {
+  margin-left: 0;
+}
+
+.subtitle-row select,
+.subtitle-row input[type="number"] {
+  box-sizing: border-box;
+}
+
 .subtitle-heading {
   display: grid;
   gap: 4px;

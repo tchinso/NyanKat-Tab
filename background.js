@@ -383,9 +383,56 @@ function handleInstalled() {
 chrome.runtime.onInstalled.addListener(handleInstalled);
 chrome.runtime.onStartup.addListener(ensureDefaultSettings);
 
+const subtitleRemoteFonts = {
+  binggrae: "https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_one@1.0/Binggrae.woff",
+  moneygraphy: "https://static.toss.im/assets/homepage/moneygraphy-font/font/Moneygraphy-Rounded-1.1.woff2",
+  tmoney: "https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_20-07@1.0/TmoneyRoundWindExtraBold.woff"
+};
+const subtitleFontRequests = new Map();
+
+function loadSubtitleRemoteFont(font) {
+  if (!Object.hasOwn(subtitleRemoteFonts, font)) {
+    return Promise.reject(new Error("Unknown font"));
+  }
+  if (!subtitleFontRequests.has(font)) {
+    const request = (async () => {
+      const response = await fetch(subtitleRemoteFonts[font], {
+        credentials: "omit",
+        signal: AbortSignal.timeout(15000)
+      });
+      if (!response.ok) {
+        throw new Error("Font unavailable");
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length > 4 * 1024 * 1024 || bytes.length < 4 ||
+          !["wOF2", "wOFF"].includes(String.fromCharCode(...bytes.subarray(0, 4)))) {
+        throw new Error("Invalid font file");
+      }
+      let binary = "";
+      for (let start = 0; start < bytes.length; start += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+      }
+      return btoa(binary);
+    })().catch((error) => {
+      subtitleFontRequests.delete(font);
+      throw error;
+    });
+    subtitleFontRequests.set(font, request);
+  }
+  return subtitleFontRequests.get(font);
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {
     return;
+  }
+
+  if (message.type === "NYANKAT_SUBTITLE_FONT_DATA") {
+    loadSubtitleRemoteFont(message.font).then(
+      (b64) => sendResponse({ ok: true, b64 }),
+      () => sendResponse({ ok: false })
+    );
+    return true;
   }
 
   if (message.type === KIO_DOWNLOAD_STATS_MESSAGE_TYPE) {

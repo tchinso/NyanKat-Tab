@@ -1,22 +1,14 @@
 "use strict";
 
 (() => {
-  if (window.__nyankatSubtitleOverlayInstalled || !window.NyanKatSubtitleParser) {
+  if (window.__nyankatSubtitleOverlayInstalled || !window.NyanKatSubtitleParser || !window.NyanKatSubtitleStyle) {
     return;
   }
   window.__nyankatSubtitleOverlayInstalled = true;
 
   const parser = window.NyanKatSubtitleParser;
-  const DEFAULT_STYLE = {
-    font: '"Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif',
-    fontSize: 48,
-    verticalPosition: 100,
-    color: "#ffffff",
-    bgColor: "#000000",
-    bgOpacity: 0.8,
-    textShadow: true,
-    visible: true
-  };
+  const subtitleStyle = window.NyanKatSubtitleStyle;
+  const { DEFAULT_STYLE, normalizeStyle } = subtitleStyle;
   const MAX_OFFSET_MS = 60 * 60 * 1000;
   const recordsById = new Map();
   const recordsByVideo = new WeakMap();
@@ -25,6 +17,8 @@
   let cleanupTimer = 0;
   let layoutFrame = 0;
   let idleDiscoveryQueued = false;
+  let savedStyle = { ...DEFAULT_STYLE };
+  let savedStyleRevision = 0;
 
   function clampNumber(value, min, max, fallback) {
     const numberValue = Number(value);
@@ -38,20 +32,6 @@
   function normalizeColor(value, fallback) {
     const color = String(value || "").trim();
     return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
-  }
-
-  function normalizeStyle(value, fallback = DEFAULT_STYLE) {
-    const font = String(value && value.font ? value.font : fallback.font).trim();
-    return {
-      font: font.slice(0, 500) || fallback.font,
-      fontSize: clampNumber(value && value.fontSize, 10, 120, fallback.fontSize),
-      verticalPosition: clampNumber(value && value.verticalPosition, 0, 100, fallback.verticalPosition),
-      color: normalizeColor(value && value.color, fallback.color),
-      bgColor: normalizeColor(value && value.bgColor, fallback.bgColor),
-      bgOpacity: clampNumber(value && value.bgOpacity, 0, 1, fallback.bgOpacity),
-      textShadow: value && typeof value.textShadow === "boolean" ? value.textShadow : fallback.textShadow,
-      visible: value && typeof value.visible === "boolean" ? value.visible : fallback.visible
-    };
   }
 
   function scheduleDisconnectedCleanup() {
@@ -152,9 +132,12 @@
       cues: [],
       currentCueIndex: -1,
       offsetMs: 0,
-      settings: { ...DEFAULT_STYLE },
+      settings: { ...savedStyle },
+      styleTouched: false,
+      requestedFont: "",
       overlay: null,
       textBox: null,
+      textLayers: null,
       resizeObserver: null,
       mediaHandlers: null,
       frameUpdateId: 0,
@@ -185,6 +168,7 @@
       record.overlay.remove();
       record.overlay = null;
       record.textBox = null;
+      record.textLayers = null;
     }
     recordsByVideo.delete(record.video);
     recordsById.delete(record.id);
@@ -333,14 +317,26 @@
 
     const overlay = document.createElement("div");
     const textBox = document.createElement("div");
+    const glyphs = document.createElement("div");
+    const textLayers = {};
     overlay.className = "nyankat-subtitle-overlay";
     overlay.setAttribute("data-nyankat-subtitle-overlay", "true");
     overlay.setAttribute("aria-hidden", "true");
     textBox.className = "nyankat-subtitle-text";
+    textBox.hidden = true;
+    glyphs.className = "nyankat-subtitle-glyphs";
+    for (const name of ["shadow", "outer-outline", "outline", "fill"]) {
+      const layer = document.createElement("span");
+      layer.className = "nyankat-subtitle-layer nyankat-subtitle-" + name;
+      glyphs.append(layer);
+      textLayers[name] = layer;
+    }
+    textBox.append(glyphs);
     overlay.append(textBox);
     document.documentElement.append(overlay);
     record.overlay = overlay;
     record.textBox = textBox;
+    record.textLayers = textLayers;
     bindOverlayEvents(record);
     applyStyle(record);
     scheduleOverlayLayout();
@@ -400,20 +396,68 @@
   }
 
   function applyStyle(record) {
-    if (!record.overlay || !record.textBox) {
+    if (!record.overlay || !record.textBox || !record.textLayers) {
       return;
     }
 
     const settings = record.settings;
     record.overlay.style.setProperty("--nyankat-subtitle-font", settings.font);
     record.overlay.style.setProperty("--nyankat-subtitle-font-size", settings.fontSize + "px");
-    record.textBox.style.color = settings.color;
-    record.textBox.style.background = hexToRgba(settings.bgColor, settings.bgOpacity);
-    record.textBox.style.textShadow = settings.textShadow
-      ? "0 0 6px rgba(0,0,0,.6), 0 0 2px rgba(0,0,0,.8)"
+    record.overlay.style.setProperty("--nyankat-subtitle-letter-spacing", settings.letterSpacing + "px");
+    record.overlay.style.setProperty("--nyankat-subtitle-line-height", String(settings.lineHeight));
+
+    const hasBackground = settings.background !== "none";
+    record.textBox.style.background = hasBackground ? hexToRgba(settings.bgColor, settings.bgOpacity) : "none";
+    record.textBox.style.border = hasBackground
+      ? settings.bgBorderWidth + "px solid " + hexToRgba(settings.bgBorderColor, settings.bgOpacity)
+      : "0 solid transparent";
+    record.textBox.style.padding = hasBackground ? settings.bgPadding + "px " + settings.bgPadding * 2 + "px" : "0";
+    record.textBox.style.borderRadius = settings.background === "pill" ? "9999px"
+      : settings.background === "box" ? "max(12px, .7em)" : ".35em";
+
+    const shadow = record.textLayers.shadow;
+    shadow.hidden = !settings.textShadow;
+    shadow.style.textShadow = settings.textShadow
+      ? settings.shadowX + "px " + settings.shadowY + "px " + settings.shadowBlur + "px " + settings.shadowColor
       : "none";
+
+    const outer = record.textLayers["outer-outline"];
+    outer.hidden = settings.outline !== "double" || settings.outlineWidth + settings.outlineWidth2 === 0;
+    outer.style.color = settings.outlineColor2;
+    outer.style.webkitTextStroke = settings.outlineWidth + settings.outlineWidth2 * 2 + "px " + settings.outlineColor2;
+
+    const outline = record.textLayers.outline;
+    const hasLine = settings.outline === "line" || settings.outline === "double";
+    outline.hidden = !(hasLine && settings.outlineWidth > 0) && settings.outline !== "neon";
+    outline.style.color = hasLine ? settings.outlineColor : "transparent";
+    outline.style.webkitTextStroke = hasLine ? settings.outlineWidth + "px " + settings.outlineColor : "0 transparent";
+    outline.style.textShadow = settings.outline === "neon"
+      ? [2, 4, 8].map((scale) => "0 0 " + Math.max(1, settings.outlineWidth * scale) + "px " + settings.outlineColor).join(", ")
+      : "none";
+
+    const fill = record.textLayers.fill;
+    fill.style.color = settings.useGradient ? "transparent" : settings.color;
+    fill.style.backgroundImage = settings.useGradient
+      ? "linear-gradient(" + settings.gradientAngle + "deg, " + settings.gradientColor1 + ", " + settings.gradientColor2 + ")"
+      : "none";
+    fill.style.backgroundClip = settings.useGradient ? "text" : "border-box";
+    fill.style.webkitBackgroundClip = settings.useGradient ? "text" : "border-box";
     record.overlay.hidden = !settings.visible;
     positionSubtitleText(record);
+
+    if (record.requestedFont !== settings.font && typeof subtitleStyle.ensureFont === "function") {
+      record.requestedFont = settings.font;
+      const font = settings.font;
+      void Promise.resolve(subtitleStyle.ensureFont(document, font)).then((loaded) => {
+        if (loaded === false && record.requestedFont === font) {
+          record.requestedFont = "";
+          return;
+        }
+        if (recordsById.has(record.id) && record.settings.font === font) {
+          scheduleOverlayLayout();
+        }
+      }).catch(() => {});
+    }
   }
 
   function positionOverlay(record) {
@@ -504,7 +548,11 @@
     }
 
     record.currentCueIndex = cueIndex;
-    record.textBox.textContent = cueIndex === -1 ? "" : record.cues[cueIndex].text;
+    const text = cueIndex === -1 ? "" : record.cues[cueIndex].text;
+    for (const layer of Object.values(record.textLayers)) {
+      layer.textContent = text;
+    }
+    record.textBox.hidden = !text.trim();
     positionSubtitleText(record);
   }
 
@@ -563,6 +611,9 @@
   }
 
   function updateStyle(record, settings) {
+    if (settings && typeof settings === "object" && Object.keys(settings).length) {
+      record.styleTouched = true;
+    }
     record.settings = normalizeStyle({ ...record.settings, ...(settings || {}) }, record.settings);
     applyStyle(record);
     scheduleOverlayLayout();
@@ -680,6 +731,7 @@
       record.overlay.remove();
       record.overlay = null;
       record.textBox = null;
+      record.textLayers = null;
     }
     return { ok: true, state: getState(record) };
   }
@@ -735,6 +787,36 @@
       sendResponse({ ok: true, state: getState(record) });
     }
   });
+
+  function applySavedStyleToRecords(onlyUntouched) {
+    for (const record of recordsById.values()) {
+      if (!onlyUntouched || !record.styleTouched) {
+        record.settings = { ...savedStyle };
+        applyStyle(record);
+      }
+    }
+    scheduleOverlayLayout();
+  }
+
+  if (chrome.storage && chrome.storage.local) {
+    const revision = savedStyleRevision;
+    void chrome.storage.local.get(["subtitleStyle", "subtitleFont"]).then((result) => {
+      if (revision !== savedStyleRevision) {
+        return;
+      }
+      savedStyle = normalizeStyle(result.subtitleStyle || { font: result.subtitleFont });
+      applySavedStyleToRecords(true);
+    }).catch(() => {});
+    if (chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === "local" && changes.subtitleStyle) {
+          savedStyleRevision += 1;
+          savedStyle = normalizeStyle(changes.subtitleStyle.newValue);
+          applySavedStyleToRecords(false);
+        }
+      });
+    }
+  }
 
   window.addEventListener("resize", scheduleOverlayLayout, { passive: true });
   window.addEventListener("scroll", scheduleOverlayLayout, { capture: true, passive: true });

@@ -1,4 +1,5 @@
 .nyankat-subtitle-overlay {
+  all: initial;
   align-items: flex-start;
   box-sizing: border-box;
   display: flex;
@@ -8,22 +9,47 @@
   z-index: 2147483647;
 }
 
-.nyankat-subtitle-overlay[hidden] {
+.nyankat-subtitle-overlay[hidden],
+.nyankat-subtitle-text[hidden],
+.nyankat-subtitle-layer[hidden] {
   display: none !important;
 }
 
 .nyankat-subtitle-text {
+  all: initial;
   background: rgba(0, 0, 0, .8);
   border-radius: .35em;
   box-sizing: border-box;
   color: #fff;
+  display: block;
   font-family: var(--nyankat-subtitle-font, "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif);
   font-size: var(--nyankat-subtitle-font-size, 48px);
-  line-height: 1.35;
+  letter-spacing: var(--nyankat-subtitle-letter-spacing, 0px);
+  line-height: var(--nyankat-subtitle-line-height, 1.35);
   max-width: 90%;
   padding: .25em .5em;
+  pointer-events: none;
   text-align: center;
-  text-shadow: 0 0 6px rgba(0, 0, 0, .6), 0 0 2px rgba(0, 0, 0, .8);
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.nyankat-subtitle-glyphs {
+  all: unset;
+  display: grid;
+  min-width: 0;
+}
+
+.nyankat-subtitle-layer {
+  all: unset;
+  display: block;
+  grid-area: 1 / 1;
+  min-width: 0;
+  text-shadow: none;
+  -webkit-text-stroke: 0 transparent;
+}
+
+.nyankat-subtitle-shadow {
+  color: transparent;
 }

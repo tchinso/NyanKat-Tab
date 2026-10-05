@@ -9,77 +9,108 @@
     offset: document.querySelector("#subtitleOffset"),
     load: document.querySelector("#loadSubtitle"),
     unload: document.querySelector("#unloadSubtitle"),
-    font: document.querySelector("#subtitleFont"),
-    fontSize: document.querySelector("#subtitleFontSize"),
-    fontSizeValue: document.querySelector("#subtitleFontSizeValue"),
-    verticalPosition: document.querySelector("#subtitleVerticalPosition"),
-    verticalPositionValue: document.querySelector("#subtitleVerticalPositionValue"),
-    color: document.querySelector("#subtitleColor"),
-    backgroundColor: document.querySelector("#subtitleBackgroundColor"),
-    backgroundOpacity: document.querySelector("#subtitleBackgroundOpacity"),
-    backgroundOpacityValue: document.querySelector("#subtitleBackgroundOpacityValue"),
-    textShadow: document.querySelector("#subtitleTextShadow"),
-    visible: document.querySelector("#subtitleVisible"),
     status: document.querySelector("#subtitleStatus")
   };
-  const DEFAULT_STYLE = {
-    font: '"Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif',
-    fontSize: 48,
-    verticalPosition: 100,
-    color: "#ffffff",
-    bgColor: "#000000",
-    bgOpacity: 0.8,
-    textShadow: true,
-    visible: true
+  const { DEFAULT_STYLE, FONT_GROUPS, normalizeStyle, fontValue, ensureFont } = window.NyanKatSubtitleStyle;
+  const controlIds = {
+    font: "subtitleFont", fontSize: "subtitleFontSize",
+    letterSpacing: "subtitleLetterSpacing", lineHeight: "subtitleLineHeight",
+    verticalPosition: "subtitleVerticalPosition", color: "subtitleColor",
+    useGradient: "subtitleUseGradient", gradientColor1: "subtitleGradientColor1",
+    gradientColor2: "subtitleGradientColor2", gradientAngle: "subtitleGradientAngle",
+    outline: "subtitleOutline", outlineColor: "subtitleOutlineColor",
+    outlineWidth: "subtitleOutlineWidth", outlineColor2: "subtitleOutlineColor2",
+    outlineWidth2: "subtitleOutlineWidth2", background: "subtitleBackground",
+    bgColor: "subtitleBackgroundColor", bgBorderColor: "subtitleBackgroundBorderColor",
+    bgPadding: "subtitleBackgroundPadding", bgBorderWidth: "subtitleBackgroundBorderWidth",
+    bgOpacity: "subtitleBackgroundOpacity", textShadow: "subtitleTextShadow",
+    shadowColor: "subtitleShadowColor", shadowBlur: "subtitleShadowBlur",
+    shadowX: "subtitleShadowX", shadowY: "subtitleShadowY", visible: "subtitleVisible"
   };
+  const controls = Object.fromEntries(Object.entries(controlIds).map(([key, id]) =>
+    [key, document.querySelector("#" + id)]
+  ));
   const targetsByKey = new Map();
   let styleTimer = 0;
   let offsetTimer = 0;
   let refreshVersion = 0;
   let uiRevision = 0;
+  let styleRevision = 0;
   let styleWrite = Promise.resolve();
-  let savedFont = DEFAULT_STYLE.font;
-  let hasSavedFont = false;
-  let fontChoiceChanged = false;
+  let savedStyle = { ...DEFAULT_STYLE };
 
-  function rememberFont(font) {
-    savedFont = font;
-    hasSavedFont = true;
-    void chrome.storage.local.set({ subtitleFont: font }).catch(() => {});
+  function persistStyle(settings) {
+    savedStyle = normalizeStyle(settings);
+    // Dispatch immediately: a popup can close before a debounce or promise queue runs.
+    try {
+      void Promise.resolve(chrome.storage.local.set({
+        subtitleStyle: { ...savedStyle },
+        subtitleFont: savedStyle.font
+      })).catch(() => setStatus("스타일을 저장하지 못했습니다."));
+    } catch {
+      setStatus("스타일을 저장하지 못했습니다.");
+    }
   }
 
   function selectFont(font) {
-    const previous = elements.font.querySelector("option[data-saved-font]");
+    const previous = controls.font.querySelector("option[data-saved-font]");
     if (previous) {
       previous.remove();
     }
     const value = typeof font === "string" && font.trim() ? font : DEFAULT_STYLE.font;
-    if (!Array.from(elements.font.options).some((option) => option.value === value)) {
+    if (!Array.from(controls.font.options).some((option) => option.value === value)) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = "이전 설정: " + value.slice(0, 80);
       option.dataset.savedFont = "true";
-      elements.font.append(option);
+      controls.font.append(option);
     }
-    elements.font.value = value;
+    controls.font.value = value;
   }
 
-  async function loadSavedFont() {
+  async function loadSavedStyle() {
+    const revision = styleRevision;
     try {
-      const result = await chrome.storage.local.get("subtitleFont");
-      const value = result && result.subtitleFont;
-      if (!fontChoiceChanged && typeof value === "string" && value.trim()) {
-        savedFont = value;
-        hasSavedFont = true;
+      const result = await chrome.storage.local.get(["subtitleStyle", "subtitleFont"]);
+      if (styleRevision !== revision) {
+        return;
+      }
+      const legacyFont = typeof result?.subtitleFont === "string" && result.subtitleFont.trim()
+        ? result.subtitleFont : DEFAULT_STYLE.font;
+      savedStyle = normalizeStyle(result?.subtitleStyle, { ...DEFAULT_STYLE, font: legacyFont });
+      applyStyle(savedStyle);
+      void warmSelectedFont();
+      if (!result?.subtitleStyle && legacyFont !== DEFAULT_STYLE.font) {
+        persistStyle(savedStyle);
       }
     } catch {
-      // Keep the built-in font stack if storage is unavailable.
+      // The defaults remain editable when storage is unavailable.
     }
-    selectFont(savedFont);
   }
 
+  function addFontOptions(groupLabel, fonts) {
+    const group = document.createElement("optgroup");
+    group.label = groupLabel;
+    for (const font of fonts) {
+      const option = document.createElement("option");
+      option.value = font.value;
+      option.textContent = font.label;
+      group.append(option);
+    }
+    controls.font.append(group);
+  }
+
+  for (const group of FONT_GROUPS) {
+    addFontOptions(group.label, group.fonts.map((font) => ({
+      value: fontValue(font.family), label: font.label
+    })));
+  }
+  applyStyle(savedStyle);
+  const styleReady = loadSavedStyle();
+  void populateFontList();
+
   async function populateFontList() {
-    await fontReady;
+    await styleReady;
     if (!chrome.fontSettings || typeof chrome.fontSettings.getFontList !== "function") {
       return;
     }
@@ -88,33 +119,25 @@
       if (!Array.isArray(fonts)) {
         return;
       }
-      const selected = elements.font.value;
+      const selected = controls.font.value;
       const seen = new Set();
-      elements.font.replaceChildren();
-      const defaultOption = document.createElement("option");
-      defaultOption.value = DEFAULT_STYLE.font;
-      defaultOption.textContent = "기본값";
-      elements.font.append(defaultOption);
-      for (const font of fonts.sort((a, b) =>
+      const installed = fonts.slice().sort((a, b) =>
         String(a.displayName || a.fontId).localeCompare(String(b.displayName || b.fontId), "ko")
-      )) {
+      ).filter((font) => {
         if (!font.fontId || seen.has(font.fontId)) {
-          continue;
+          return false;
         }
         seen.add(font.fontId);
-        const option = document.createElement("option");
-        option.value = JSON.stringify(font.fontId);
-        option.textContent = font.displayName || font.fontId;
-        elements.font.append(option);
+        return true;
+      }).map((font) => ({ value: JSON.stringify(font.fontId), label: font.displayName || font.fontId }));
+      if (installed.length) {
+        addFontOptions("PC에 설치된 글꼴", installed);
       }
       selectFont(selected);
     } catch {
-      // A font selected in an older version remains usable.
+      // Built-in fonts and a previously selected local font remain available.
     }
   }
-
-  const fontReady = loadSavedFont();
-  void populateFontList();
 
   function setStatus(text) {
     elements.status.textContent = text;
@@ -179,36 +202,84 @@
   }
 
   function readStyle() {
-    return {
-      font: elements.font.value,
-      fontSize: Number(elements.fontSize.value),
-      verticalPosition: Number(elements.verticalPosition.value),
-      color: elements.color.value,
-      bgColor: elements.backgroundColor.value,
-      bgOpacity: Number(elements.backgroundOpacity.value),
-      textShadow: elements.textShadow.checked,
-      visible: elements.visible.checked
-    };
+    const settings = {};
+    for (const [key, control] of Object.entries(controls)) {
+      if (key === "textShadow") {
+        settings[key] = control.value === "on";
+      } else if (key === "bgOpacity") {
+        settings[key] = (100 - Number(control.value)) / 100;
+      } else if (typeof DEFAULT_STYLE[key] === "boolean") {
+        settings[key] = control.checked;
+      } else if (typeof DEFAULT_STYLE[key] === "number") {
+        settings[key] = Number(control.value);
+      } else {
+        settings[key] = control.value;
+      }
+    }
+    return normalizeStyle(settings);
+  }
+
+  function applyStyle(value) {
+    const settings = normalizeStyle(value);
+    for (const [key, control] of Object.entries(controls)) {
+      if (key === "font") {
+        selectFont(settings.font);
+      } else if (key === "textShadow") {
+        control.value = settings.textShadow ? "on" : "none";
+      } else if (key === "bgOpacity") {
+        control.value = String(Math.round((1 - settings.bgOpacity) * 100));
+      } else if (typeof settings[key] === "boolean") {
+        control.checked = settings[key];
+      } else {
+        control.value = String(settings[key]);
+      }
+    }
+    updateStyleFields();
+  }
+
+  function updateStyleFields() {
+    const settings = readStyle();
+    for (const [key, control] of Object.entries(controls)) {
+      const output = document.querySelector("#" + controlIds[key] + "Value");
+      if (!output) {
+        continue;
+      }
+      if (key === "bgOpacity") {
+        output.value = control.value + "%";
+      } else if (key === "verticalPosition") {
+        output.value = settings[key] + "%";
+      } else if (key === "gradientAngle") {
+        output.value = settings[key] + "°";
+      } else if (key === "lineHeight") {
+        output.value = Number(settings[key]).toFixed(2) + " 배";
+      } else {
+        output.value = settings[key] + " px";
+      }
+    }
+    document.querySelector("#subtitleSolidColorFields").hidden = settings.useGradient;
+    document.querySelector("#subtitleGradientFields").hidden = !settings.useGradient;
+    document.querySelector("#subtitleOutlineFields").hidden = settings.outline === "none";
+    document.querySelector("#subtitleDoubleOutlineFields").hidden = settings.outline !== "double";
+    document.querySelector("#subtitleBackgroundFields").hidden = settings.background === "none";
+    document.querySelector("#subtitleShadowFields").hidden = !settings.textShadow;
+  }
+
+  async function warmSelectedFont() {
+    if (typeof ensureFont !== "function") {
+      return;
+    }
+    const font = controls.font.value;
+    const loaded = await ensureFont(document, font);
+    if (!loaded && controls.font.value === font) {
+      setStatus("선택한 기본 제공 글꼴을 불러오지 못했습니다. 다시 선택해 주세요.");
+    }
   }
 
   function applyState(state) {
-    if (!state) {
-      return;
+    // Stored style and the user's edits are authoritative; overlay replies can be stale.
+    if (state) {
+      elements.offset.value = String(Math.round(Number(state.offsetMs) || 0));
     }
-
-    const settings = { ...DEFAULT_STYLE, ...(state.settings || {}) };
-    selectFont(settings.font);
-    elements.fontSize.value = String(settings.fontSize);
-    elements.fontSizeValue.value = settings.fontSize + " px";
-    elements.verticalPosition.value = String(settings.verticalPosition);
-    elements.verticalPositionValue.value = settings.verticalPosition + "%";
-    elements.color.value = settings.color;
-    elements.backgroundColor.value = settings.bgColor;
-    elements.backgroundOpacity.value = String(settings.bgOpacity);
-    elements.backgroundOpacityValue.value = String(settings.bgOpacity);
-    elements.textShadow.checked = settings.textShadow !== false;
-    elements.visible.checked = settings.visible !== false;
-    elements.offset.value = String(Math.round(Number(state.offsetMs) || 0));
   }
 
   function isCurrentRequest(target, revision) {
@@ -222,27 +293,19 @@
     }
     const revision = uiRevision;
 
-    await fontReady;
+    await styleReady;
     if (!isCurrentRequest(target, revision)) {
       return;
     }
 
-    let response = await sendToFrame(target.tabId, target.frameId, {
+    const response = await sendToFrame(target.tabId, target.frameId, {
       type: "NYANKAT_SUBTITLE_GET_STATUS",
       payload: { videoId: target.videoId }
     });
     if (response && response.ok && isCurrentRequest(target, revision)) {
-      if (!hasSavedFont && response.state.settings.font !== DEFAULT_STYLE.font) {
-        rememberFont(response.state.settings.font);
-      }
-      if (response.state.settings.font !== savedFont) {
-        const updated = await sendStyleToTarget(target, { font: savedFont });
-        if (updated && updated.ok) {
-          response = updated;
-        }
-      }
+      const updated = await sendStyleToTarget(target, readStyle());
       if (isCurrentRequest(target, revision)) {
-        applyState(response.state);
+        applyState(updated?.ok ? updated.state : response.state);
       }
     }
   }
@@ -342,7 +405,7 @@
   }
 
   async function loadSubtitle() {
-    await fontReady;
+    await styleReady;
     const file = elements.file.files && elements.file.files[0];
     if (!file) {
       setStatus("자막 파일을 선택하세요.");
@@ -398,14 +461,17 @@
 
   function queueStyleUpdate() {
     const revision = ++uiRevision;
+    styleRevision += 1;
     const target = getSelectedTarget();
     const settings = readStyle();
+    persistStyle(settings);
+    updateStyleFields();
     window.clearTimeout(styleTimer);
+    if (!target) {
+      setStatus("표시 스타일을 저장했습니다.");
+      return;
+    }
     styleTimer = window.setTimeout(async () => {
-      if (!target) {
-        setStatus("먼저 대상 동영상을 선택하세요.");
-        return;
-      }
       const response = await sendStyleToTarget(target, settings);
       if (response && response.ok && isCurrentRequest(target, revision)) {
         applyState(response.state);
@@ -443,12 +509,6 @@
   elements.offset.addEventListener("input", queueOffsetUpdate);
   elements.offset.addEventListener("change", queueOffsetUpdate);
 
-  elements.font.addEventListener("change", () => {
-    fontChoiceChanged = true;
-    rememberFont(elements.font.value);
-    queueStyleUpdate();
-  });
-
   for (const button of document.querySelectorAll("[data-offset-adjust]")) {
     button.addEventListener("click", async () => {
       const revision = ++uiRevision;
@@ -468,34 +528,18 @@
     });
   }
 
-  for (const control of [
-    elements.fontSize,
-    elements.verticalPosition,
-    elements.color,
-    elements.backgroundColor,
-    elements.backgroundOpacity,
-    elements.textShadow,
-    elements.visible
-  ]) {
+  for (const control of Object.values(controls)) {
     control.addEventListener("input", () => {
-      if (control === elements.backgroundOpacity) {
-        elements.backgroundOpacityValue.value = control.value;
-      } else if (control === elements.fontSize) {
-        elements.fontSizeValue.value = control.value + " px";
-      } else if (control === elements.verticalPosition) {
-        elements.verticalPositionValue.value = control.value + "%";
-      }
       queueStyleUpdate();
+      if (control === controls.font) {
+        void warmSelectedFont();
+      }
     });
     control.addEventListener("change", () => {
-      if (control === elements.backgroundOpacity) {
-        elements.backgroundOpacityValue.value = control.value;
-      } else if (control === elements.fontSize) {
-        elements.fontSizeValue.value = control.value + " px";
-      } else if (control === elements.verticalPosition) {
-        elements.verticalPositionValue.value = control.value + "%";
-      }
       queueStyleUpdate();
+      if (control === controls.font) {
+        void warmSelectedFont();
+      }
     });
   }
 

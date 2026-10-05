@@ -10,6 +10,7 @@ Chrome MV3 extension for:
 - showing floating auto-scroll buttons with configurable opacity and site exclusions
 - downloading detected soft subtitles from the popup's separate **자막추출** tab
 - applying local subtitles to videos using the existing **자막** overlay tab
+- saving every subtitle display option, including built-in/installed fonts, text spacing, gradient fills, outlines, backgrounds, and shadows
 - unlocking disabled `button` elements, closing newly opened tooltips and the Kiosk support popup, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
 - persisting the YouTube, kone.gg decoder, and floating scroll settings across browser restarts
 
@@ -17,6 +18,7 @@ Chrome MV3 extension for:
 
 - `contextMenus`: adds the `NyanKatX3 Tab > Base64 디코딩` menu for selected page text.
 - `storage`: saves the popup and floating-scroll settings, and keeps the temporary kio.ac detection snapshot in session storage.
+- `fontSettings`: lists fonts installed on the PC for the subtitle font selector.
 - `webNavigation`: detects failed top-level navigations to the primary and first fallback URLs.
 - `webRequest`: observes subtitle/manifest response URLs in the current tab, including embedded players and worker requests. It does not intercept video bodies.
 - `downloads`: saves validated subtitle files after the user presses **다운로드**.
@@ -43,6 +45,14 @@ The engine observes HTML tracks, loaded native cues, player configuration/JSON, 
 Each fetched resource is limited to 4 MiB; gathered subtitles are limited to 24 MiB. The engine validates timed content before saving, retries transient CDN errors, preserves the originating player context when reading captions, and clears stale discoveries on navigation. Sites that block a request may require enabling the desired caption language so the player loads it first.
 
 Run the automated checks with `node --test`. See [site validation](tests/fixtures/subtitle-sites/README.md) for observed player mechanisms and the limits of the live-site verification.
+
+## Subtitle display styles
+
+The **자막** tab saves all display options automatically in extension local storage, even without a selected video. The saved style is restored when reopening the popup and applies to subsequent subtitles. Existing saved font selections are migrated. File selection and subtitle timing offsets remain specific to the current subtitle/video.
+
+The font selector includes **깔끔한** and **귀여운** groups with 11 supplied fonts, alongside **PC에 설치된 글꼴**. Eight font files ship with the extension; Binggrae, Moneygraphy Rounded, and Tmoney RoundWind load as web fonts and need an internet connection. See [font sources and licenses](fonts/README.md).
+
+Style controls include font size, letter spacing, line height, vertical position, solid or two-color gradient fills and direction, none/basic/double/neon outlines, and no/simple rectangle/box/pill backgrounds. Double outlines have separate inner/outer colors and widths. Background fill, border, padding, border width and transparency are independent of the text. Shadows can be disabled or configured with color, blur, and X/Y offsets. Background transparency ranges from 0% (opaque) to 100% (invisible).
 
 ## Chrome Web Store notes
 

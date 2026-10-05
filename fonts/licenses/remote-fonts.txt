@@ -1,0 +1,28 @@
+런타임 웹폰트 출처 및 저작권 안내
+확인일: 2026-10-05
+
+아래 세 글꼴의 원본 파일은 이 저장소 또는 확장 프로그램 패키지에 포함하지 않습니다.
+선택 시 웹폰트를 내려받아 사용하며, 글꼴 파일을 수정하거나 파일 자체를 판매하지 않습니다.
+각 글꼴의 사용에는 제작자 사용 규정이 적용됩니다.
+
+빙그레체 / Binggrae
+저작권: Copyright (C) BINGGRAE. and YoonDesign Inc. All rights reserved.
+제작자: 빙그레, 윤디자인
+공식 출처: https://www.bingfont.co.kr/
+웹폰트 출처: https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_one@1.0/Binggrae.woff
+공식 사이트의 배포 조건을 재확인할 수 없어 파일을 동봉하지 않습니다.
+
+머니그라피 Rounded / Moneygraphy Rounded
+제공: 토스
+공식 출처 및 사용 규정: https://toss.im/moneygraphy-font
+웹폰트 출처: https://static.toss.im/assets/homepage/moneygraphy-font/font/Moneygraphy-Rounded-1.1.woff2
+제작자 사용 규정이 글꼴 파일 재배포를 금지하므로 공식 호스팅 파일만 사용합니다.
+
+티머니 둥근바람체 / Tmoney RoundWind
+저작권: 주식회사 티머니
+제작자: 티머니, 윤디자인
+공식 출처: https://company.tmoney.co.kr/ci/ci_font.dev
+사용 규정 및 웹폰트 안내: https://noonnu.cc/font_page/458
+웹폰트 출처: https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_20-07@1.0/TmoneyRoundWindExtraBold.woff
+개인·기업 사용자에게 무료 제공되며, 글꼴 자체 판매와 임의 수정·개작 후 재배포는 금지됩니다.
+공개 파일 재배포 허용 범위를 확정하지 않아 파일을 동봉하지 않습니다.
