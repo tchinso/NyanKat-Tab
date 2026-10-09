@@ -88,13 +88,29 @@
   }
 
   function render(tracks) {
-    // The same URL is often reported both by the network observer and its frame.
-    const unique = new Map();
     const score = (track) => (track.verified ? 100 : 0) + (track.documentId ? 20 : 0) +
       (track.frameId > 0 ? 10 : 0) + (/html-track|native-cues|blob|page-fetch/.test(track.source) ? 15 : 0) +
       (track.label !== "자막" ? 5 : 0);
+    // Keep the player's usable proxy instead of a duplicate origin URL that
+    // its CDN rejects. Alias identity is exact and confined to one document.
+    const groups = new Map();
     for (const track of tracks) {
-      const key = track.url + ":" + (track.representationId || "");
+      const identity = window.NyanKatSubtitleExtractor.captionIdentity(track.url, track.pageUrl);
+      const key = JSON.stringify([track.frameId, track.documentId || track.pageUrl || "", identity, track.representationId || ""]);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ track, proxy: identity !== track.url });
+    }
+    const candidates = [];
+    for (const group of groups.values()) {
+      const proxies = group.filter(item => item.proxy);
+      if (!proxies.length) { candidates.push(...group.map(item => item.track)); continue; }
+      const preferred = proxies.reduce((best, item) => score(item.track) > score(best.track) ? item : best).track;
+      candidates.push({ ...preferred, format: preferred.format || group.find(item => item.track.format)?.track.format || "" });
+    }
+    // Preserve existing same-URL deduplication across discovery frames.
+    const unique = new Map();
+    for (const track of candidates) {
+      const key = JSON.stringify([track.url, track.representationId || ""]);
       const previous = unique.get(key);
       if (!previous || score(track) > score(previous)) unique.set(key, track);
     }

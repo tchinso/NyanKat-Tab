@@ -26,6 +26,12 @@
   const scannedAttributes = new WeakMap();
   const inlineResources = new Map();
   const originalFetch = typeof window.fetch === "function" ? window.fetch : null;
+  const captureErrorStack = typeof Error.captureStackTrace === "function" ? Error.captureStackTrace : null;
+  const probeScriptUrl = (() => {
+    try {
+      return new Error().stack.match(/(?:chrome-extension|extensions):\/\/[^\s)]+\/subtitle-probe\.js(?=:\d+)/)?.[0] || "";
+    } catch (_) { return ""; }
+  })();
   const frameToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
   const encode = typeof TextEncoder === "function" ? new TextEncoder() : null;
   let cacheBytes = 0;
@@ -299,6 +305,22 @@
     return null;
   }
 
+  function observeFetchFailure(error) {
+    try {
+      if (!captureErrorStack || !probeScriptUrl || error?.name !== "TypeError" ||
+          error.message !== "Failed to fetch" || typeof error.stack !== "string") return;
+      const lines = error.stack.split(/\r?\n/);
+      if (!lines[1]?.includes(probeScriptUrl + ":")) return;
+      const pageStack = lines.filter(line => !line.includes(probeScriptUrl + ":")).join("\n");
+      // Native fetch records this MAIN-world wrapper as its error origin. A
+      // site's uncaught derived promise can then look like an extension error.
+      // Preserve the same rejected Error and its page caller's display stack,
+      // while removing our observation frame from Chromium's native trace.
+      captureErrorStack(error, observeFetchFailure);
+      error.stack = pageStack;
+    } catch (_) { /* Read-only or custom errors keep their original trace. */ }
+  }
+
   function tapFetch() {
     if (!originalFetch) return;
     window.fetch = function (...args) {
@@ -315,9 +337,9 @@
           responseReads++;
           readBoundedResponse(clone).then(text => {
             if (requestGeneration === generation && text !== null) inspectText(text, url, contentType, "network", originalUrl);
-          }).catch(() => {}).finally(() => { responseReads--; });
+          }).catch(observeFetchFailure).finally(() => { responseReads--; });
         } catch (_) {}
-      }, () => {});
+      }, observeFetchFailure);
       return promise;
     };
   }

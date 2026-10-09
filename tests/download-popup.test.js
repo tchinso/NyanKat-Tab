@@ -14,6 +14,14 @@ const TRACK = {
   id: "track-1", url: "https://example.test/english.vtt", label: "English", language: "en",
   format: "vtt", source: "html-track", verified: true
 };
+const ANIMEX = { frameId: 3, documentId: "player-document", pageUrl: "https://plyr.animex.one/e/synthetic-episode/1" };
+
+function animexProxy(original) {
+  const bytes = Buffer.from(original + "\u0000https://megaplay.buzz/");
+  const key = "10b06cdc1ca48c9fb0b94af97cc040cf";
+  for (let index = 0; index < bytes.length; index++) bytes[index] ^= key.charCodeAt(index % key.length);
+  return "https://cdnx.aniwatchtv.site/uwu/" + bytes.toString("base64url");
+}
 
 class Element {
   constructor(tagName) {
@@ -56,9 +64,9 @@ async function harness(options = {}) {
     runtime: {
       async sendMessage(message) {
         requests.push(message);
-        if (message.type === "NYANKAT_DOWNLOAD_LIST") return { ok: true, tracks: [TRACK] };
+        if (message.type === "NYANKAT_DOWNLOAD_LIST") return { ok: true, tracks: options.tracks || [TRACK] };
         if (message.type === "NYANKAT_DOWNLOAD_PREPARE") {
-          return options.prepare ? options.prepare() : { ok: true, text: TEXT, format: "vtt", filename: "English.vtt", partial: !!options.partial };
+          return options.prepare ? options.prepare(message) : { ok: true, text: TEXT, format: "vtt", filename: "English.vtt", partial: !!options.partial };
         }
         return { ok: true };
       }
@@ -101,6 +109,62 @@ test("download retains the existing save action after adding translation", async
   await settle();
   assert.equal(h.requests.filter(request => request.type === "NYANKAT_DOWNLOAD_SAVE").length, 1);
   assert.equal(h.imports.length, 0);
+});
+
+test("the first AnimeX row uses the player's proxy for download and translation in either discovery order", async () => {
+  const original = { ...TRACK, ...ANIMEX, id: "original", url: "https://cdn.example/english.vtt?token=a%2Fb", source: "network", verified: true };
+  const proxy = { ...original, id: "proxy", url: animexProxy(original.url), source: "html-track", verified: false, format: "" };
+  for (const tracks of [[original, proxy], [proxy, original]]) {
+    const h = await harness({ tracks });
+    assert.equal(h.elements.downloadTracks.children.length, 1);
+    assert.match(h.elements.downloadTracks.children[0].children[0].children[1].textContent, /^VTT/);
+    h.download.emit("click");
+    await settle();
+    h.translate.emit("click");
+    await settle();
+    assert.deepEqual(h.requests.filter(request => /NYANKAT_DOWNLOAD_(SAVE|PREPARE)$/.test(request.type))
+      .map(request => [request.type, request.id]), [["NYANKAT_DOWNLOAD_SAVE", "proxy"], ["NYANKAT_DOWNLOAD_PREPARE", "proxy"]]);
+    assert.equal(h.imports.length, 1);
+    assert.equal(await h.imports[0].file.text(), TEXT);
+  }
+});
+
+test("English, Forced, CC and native cues remain separate after AnimeX alias deduplication", async () => {
+  const originals = ["English", "English Forced", "English CC"].map((label, index) => ({
+    ...TRACK, ...ANIMEX, id: "original-" + index, url: "https://cdn.example/english-" + index + ".vtt", label, source: "network"
+  }));
+  const proxies = originals.map((track, index) => ({ ...track, id: "proxy-" + index, url: animexProxy(track.url), source: "html-track" }));
+  const native = { ...TRACK, ...ANIMEX, id: "native", url: "nyankat-cues:english", kind: "cues", source: "native-cues", partial: true };
+  const h = await harness({ tracks: [...originals, ...proxies, native] });
+  const rows = h.elements.downloadTracks.children;
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows.map(row => row.children[0].children[0].textContent), ["English · en", "English Forced · en", "English CC · en", "English · en"]);
+  for (const row of rows) { row.children[1].children[1].emit("click"); await settle(); }
+  assert.deepEqual(h.requests.filter(request => request.type === "NYANKAT_DOWNLOAD_SAVE").map(request => request.id), ["proxy-0", "proxy-1", "proxy-2", "native"]);
+});
+
+test("caption aliases are not merged across documents, frames, renditions or unrelated players", async () => {
+  const original = { ...TRACK, ...ANIMEX, id: "original", url: "https://cdn.example/english.vtt", source: "network" };
+  const proxy = { ...original, id: "proxy", url: animexProxy(original.url), source: "html-track" };
+  for (const changes of [
+    { frameId: 4 }, { documentId: "other-document" }, { representationId: "other-rendition" },
+    { pageUrl: "https://player.example/embed" },
+    { url: animexProxy("https://cdn.example/another-english.vtt") },
+    { url: "https://cdnx.aniwatchtv.site/uwu/invalid" }
+  ]) {
+    const h = await harness({ tracks: [original, { ...proxy, ...changes }] });
+    assert.equal(h.elements.downloadTracks.children.length, 2, JSON.stringify(changes));
+  }
+});
+
+test("ordinary same-URL discoveries still select the verified frame without duplicate rows", async () => {
+  const first = { ...TRACK, id: "parent", frameId: 0, documentId: "parent", source: "network", verified: false };
+  const cached = { ...TRACK, id: "cached", frameId: 3, documentId: "player", source: "page-fetch", verified: true };
+  const h = await harness({ tracks: [first, cached] });
+  assert.equal(h.elements.downloadTracks.children.length, 1);
+  h.download.emit("click");
+  await settle();
+  assert.equal(h.requests.find(request => request.type === "NYANKAT_DOWNLOAD_SAVE").id, "cached");
 });
 
 test("preparation errors show the existing reason and do not import a file", async () => {

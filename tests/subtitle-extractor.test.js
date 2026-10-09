@@ -9,6 +9,84 @@ const extractor = require("../subtitle-extractor.js");
 const BASE = "https://cdn.example/video/episode/master.m3u8?token=secret";
 const vtt = (body) => `WEBVTT\n\n${body}`;
 
+function animexProxy(payload) {
+  const bytes = Buffer.from(payload);
+  const key = "10b06cdc1ca48c9fb0b94af97cc040cf";
+  for (let index = 0; index < bytes.length; index++) bytes[index] ^= key.charCodeAt(index % key.length);
+  return "https://cdnx.aniwatchtv.site/uwu/" + bytes.toString("base64url");
+}
+
+test("AnimeX proxy identity preserves exact caption URLs and distinct English renditions", () => {
+  const page = "https://plyr.animex.one/e/synthetic-episode/1?lang=sub";
+  const originals = [
+    "https://cdn.example/subtitles/english.vtt?token=a%2Fb&expires=42",
+    "https://cdn.example/subtitles/english-forced.vtt?token=c%2Fd",
+    "https://cdn.example/subtitles/english-cc.vtt?token=e%2Ff"
+  ];
+  const identities = originals.map((original, index) => extractor.captionIdentity(
+    animexProxy(original + "\u0000https://megaplay.buzz/" + (index === 2 ? "\u0000Mozilla/5.0 Synthetic" : "")), page
+  ));
+  assert.deepEqual(identities, originals);
+  assert.equal(new Set(identities).size, 3);
+  assert.equal(extractor.captionIdentity(originals[0], page), originals[0]);
+});
+
+test("AnimeX proxy identity is restricted to the observed player and transport", () => {
+  const page = "https://plyr.animex.one/e/synthetic-episode/1";
+  const proxy = animexProxy("https://cdn.example/english.ass\u0000https://megaplay.buzz/");
+  assert.equal(extractor.captionIdentity(proxy, page), "https://cdn.example/english.ass");
+  for (const otherPage of ["https://watch.example/episode", "https://animex.one/watch/episode", "https://plyr.animex.one.evil.test/episode", "http://plyr.animex.one/episode", "invalid"]) {
+    assert.equal(extractor.captionIdentity(proxy, otherPage), proxy);
+  }
+  for (const otherProxy of [
+    proxy.replace("cdnx.aniwatchtv.site", "cdn.example"),
+    proxy.replace("cdnx.aniwatchtv.site", "cdnx.aniwatchtv.site.evil.test"),
+    proxy.replace("https:", "http:"), proxy.replace("/uwu/", "/other/"),
+    proxy.replace("https://", "https://user@"), proxy + "?token=1", proxy + "#fragment"
+  ]) assert.equal(extractor.captionIdentity(otherProxy, page), otherProxy);
+});
+
+test("malformed, incomplete and non-caption proxy payloads never become caption identities", () => {
+  const page = "https://plyr.animex.one/e/synthetic-episode/1";
+  const original = "https://cdn.example/english.vtt";
+  const valid = original + "\u0000https://megaplay.buzz/";
+  const invalidPayloads = [
+    original, original + "\u0000", original + "\u0000https://megaplay.buzz", valid + "\u0000",
+    valid + "\u0000Agent\u0000extra", valid + "\u0000Agent\r\nHeader",
+    original + "\u0000javascript:alert(1)", original + "\u0000https://user:password@megaplay.buzz/",
+    "https://user:password@cdn.example/english.vtt\u0000https://megaplay.buzz/",
+    "https://cdn.example/video.mp4\u0000https://megaplay.buzz/",
+    "https://cdn.example/subtitles.m3u8\u0000https://megaplay.buzz/",
+    "https://cdn.example/opaque-object\u0000https://megaplay.buzz/",
+    "nyankat-cues:loaded-track\u0000https://megaplay.buzz/",
+    "https://cdn.example/a b.vtt\u0000https://megaplay.buzz/",
+    Buffer.concat([Buffer.from(valid), Buffer.from([0, 0xff])])
+  ];
+  for (const payload of invalidPayloads) {
+    const proxy = animexProxy(payload);
+    assert.equal(extractor.captionIdentity(proxy, page), proxy);
+  }
+  for (const token of ["", "A", "abc=", "abc+", "ab", "AAA_", "A".repeat(16385)]) {
+    const proxy = "https://cdnx.aniwatchtv.site/uwu/" + token;
+    assert.equal(extractor.captionIdentity(proxy, page), proxy);
+  }
+  let canonical = animexProxy(valid);
+  if (canonical.split("/").at(-1).length % 4 === 0) canonical = animexProxy(valid + "\u0000A");
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const noncanonical = canonical.slice(0, -1) + alphabet[alphabet.indexOf(canonical.at(-1)) | 1];
+  assert.equal(extractor.captionIdentity(noncanonical, page), noncanonical, "nonzero unused bits cannot alias an otherwise valid payload");
+  const truncated = canonical.slice(0, -2);
+  assert.equal(extractor.captionIdentity(truncated, page), truncated);
+});
+
+test("caption proxy identity also decodes in a worker without atob or TextDecoder", () => {
+  const context = { URL };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "subtitle-extractor.js"), "utf8"), context);
+  const original = "https://cdn.example/subtitles/english.srt?token=encoded%2Bvalue";
+  const proxy = animexProxy(original + "\u0000https://megaplay.buzz/");
+  assert.equal(context.NyanKatSubtitleExtractor.captionIdentity(proxy, "https://plyr.animex.one/episode"), original);
+});
+
 test("the core loads in a browser/worker without window, DOM, or require", () => {
   const context = { URL };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "subtitle-extractor.js"), "utf8"), context);

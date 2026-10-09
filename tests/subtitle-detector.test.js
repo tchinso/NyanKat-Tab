@@ -11,6 +11,8 @@ const probeSource = fs.readFileSync(path.join(__dirname, "..", "subtitle-probe.j
 const detectorSource = fs.readFileSync(path.join(__dirname, "..", "subtitle-detector.js"), "utf8");
 const VTT = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello\n";
 const ASS = "[Script Info]\nTitle: test\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Hello";
+const PROBE_URL = "chrome-extension://extension/subtitle-probe.js";
+const FETCH_STACK = "TypeError: Failed to fetch\n    at window.fetch (" + PROBE_URL + ":306:31)\n    at fetchSvg (https://watch.example/player.js:21:8)\n    at https://watch.example/player.js:40:3";
 
 function createEnvironment(options = {}) {
   const listeners = new Map();
@@ -61,13 +63,13 @@ function createEnvironment(options = {}) {
     setTimeout(callback, delay) { const id = timerId++; timers.set(id, { callback, delay }); return id; },
     clearTimeout(id) { timers.delete(id); },
     addEventListener(type, listener) { if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(listener); },
-    fetch: async (url, config) => {
+    fetch: options.nativeFetch || (async (url, config) => {
       requests.push({ url, config });
       const text = typeof options.fetchText === "function" ? await options.fetchText(url, config) : options.fetchText || VTT;
       const response = new Response(text, { headers: { "content-type": options.contentType || "text/vtt" } });
       Object.defineProperty(response, "url", { value: String(url) });
       return response;
-    },
+    }),
     chrome: { runtime: {
       sendMessage(message) { detections.push(message); return Promise.resolve(); },
       onMessage: { addListener(listener) { runtimeListener = listener; } }
@@ -82,7 +84,8 @@ function createEnvironment(options = {}) {
     for (const listener of listeners.get("message") || []) listener({ source: pageWindow, data: message });
   };
   vm.runInContext(extractorSource, context);
-  vm.runInContext(probeSource, context);
+  if (options.captureErrorStack === false) vm.runInContext("Error.captureStackTrace = undefined", context);
+  vm.runInContext(probeSource, context, { filename: PROBE_URL });
   if (options.bridge !== false) vm.runInContext(detectorSource, context);
 
   async function settle() {
@@ -125,6 +128,56 @@ test("network captions are cached, verified, and disclosed only on an explicit r
   assert.ok(!environment.posts.filter(post => post.type === "discover").some(post => JSON.stringify(post).includes("Hello")));
   assert.equal((await environment.read(found.tracks[0].url)).text, VTT);
   assert.equal(environment.requests.length, 1);
+});
+
+test("native fetch failures keep their original rejected promise and error with the page caller's stack", async () => {
+  const error = new TypeError("Failed to fetch");
+  error.stack = FETCH_STACK;
+  const rejected = Promise.reject(error);
+  const environment = createEnvironment({ nativeFetch: () => rejected });
+  const result = environment.context.fetch("https://unavailable.example/icon.svg");
+  assert.equal(result, rejected);
+  await assert.rejects(result, actual => actual === error);
+  assert.equal(error.name, "TypeError");
+  assert.equal(error.message, "Failed to fetch");
+  assert.equal(error.stack, FETCH_STACK.split("\n").filter(line => !line.includes(PROBE_URL)).join("\n"));
+  await environment.settle();
+});
+
+test("unrelated, page-owned and immutable fetch errors retain their original traces", async () => {
+  const errors = [
+    Object.assign(new TypeError("Invalid URL"), { stack: FETCH_STACK.replace("Failed to fetch", "Invalid URL") }),
+    Object.assign(new Error("Failed to fetch"), { name: "AbortError", stack: FETCH_STACK.replace("TypeError", "AbortError") }),
+    Object.assign(new TypeError("Failed to fetch"), { stack: "TypeError: Failed to fetch\n    at fetchSvg (https://watch.example/player.js:21:8)\n    at window.fetch (" + PROBE_URL + ":306:31)" }),
+    Object.freeze(Object.assign(new TypeError("Failed to fetch"), { stack: FETCH_STACK }))
+  ];
+  for (const error of errors) {
+    const originalStack = error.stack;
+    const environment = createEnvironment({ nativeFetch: () => Promise.reject(error) });
+    await assert.rejects(environment.context.fetch("https://unavailable.example/icon.svg"), actual => actual === error);
+    await environment.settle();
+    assert.equal(error.stack, originalStack);
+  }
+});
+
+test("fetch rejection remains unchanged when native stack capture is unavailable", async () => {
+  const error = Object.assign(new TypeError("Failed to fetch"), { stack: FETCH_STACK });
+  const environment = createEnvironment({ nativeFetch: () => Promise.reject(error), captureErrorStack: false });
+  await assert.rejects(environment.context.fetch("https://unavailable.example/icon.svg"), actual => actual === error);
+  await environment.settle();
+  assert.equal(error.stack, FETCH_STACK);
+});
+
+test("failed cloned response reads keep the page's response and original body error", async () => {
+  const error = Object.assign(new TypeError("Failed to fetch"), { stack: FETCH_STACK });
+  const body = new ReadableStream({ start(controller) { controller.error(error); } });
+  const response = new Response(body, { headers: { "content-type": "text/vtt" } });
+  Object.defineProperty(response, "url", { value: "https://cdn.example/sub.vtt" });
+  const environment = createEnvironment({ nativeFetch: () => Promise.resolve(response) });
+  assert.equal(await environment.context.fetch(response.url), response);
+  await environment.settle();
+  await assert.rejects(response.text(), actual => actual === error);
+  assert.equal(error.stack, FETCH_STACK.split("\n").filter(line => !line.includes(PROBE_URL)).join("\n"));
 });
 
 test("JSON player API responses discover opaque subtitle URLs", async () => {

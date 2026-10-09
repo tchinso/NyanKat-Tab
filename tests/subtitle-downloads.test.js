@@ -10,6 +10,14 @@ const source = fs.readFileSync(path.join(__dirname, "..", "subtitle-downloads.js
 const VTT = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello 한글\n";
 const PAGE = { tab: { id: 7, title: "Episode / One" }, frameId: 3, documentId: "frame-3", url: "https://player.example/embed", id: "extension" };
 const UI = { id: "extension", url: "chrome-extension://extension/popup.html" };
+const ANIMEX = { ...PAGE, url: "https://plyr.animex.one/e/synthetic-episode/1" };
+
+function animexProxy(original) {
+  const bytes = Buffer.from(original + "\u0000https://megaplay.buzz/");
+  const key = "10b06cdc1ca48c9fb0b94af97cc040cf";
+  for (let index = 0; index < bytes.length; index++) bytes[index] ^= key.charCodeAt(index % key.length);
+  return "https://cdnx.aniwatchtv.site/uwu/" + bytes.toString("base64url");
+}
 
 function event() {
   const listeners = [];
@@ -154,6 +162,80 @@ test("caption fallback cannot use a different URL or DASH representation from an
   assert.equal((await h.message({ type: "NYANKAT_DOWNLOAD_PREPARE", tabId: 7, id: selected.id })).ok, true);
   assert.equal(h.frameRequests.filter(request => request.message.type === "NYANKAT_DOWNLOAD_READ").length, 1);
   assert.equal(h.fetches.length, 1);
+});
+
+test("an original AnimeX caption rejected by the CDN uses its discovered player proxy for both buttons", async t => {
+  const original = "https://cdn.example/english.vtt?token=a%2Fb&expires=42";
+  const proxy = animexProxy(original);
+  const h = await harness({
+    frameRead: message => message.url === proxy ? { ok: true, text: VTT, contentType: "text/vtt" } : { ok: false, reason: "http_403" },
+    fetch: async () => new Response("Forbidden", { status: 403 })
+  });
+  t.after(() => h.close());
+  await h.message({ type: "NYANKAT_DOWNLOAD_DETECTED", tracks: [
+    { url: original, label: "English", language: "en", format: "vtt", source: "network" },
+    { url: proxy, label: "English", language: "en", source: "html-track" }
+  ] }, ANIMEX);
+  const track = (await h.message({ type: "NYANKAT_DOWNLOAD_LIST", tabId: 7 })).tracks[0];
+  const prepared = await h.message({ type: "NYANKAT_DOWNLOAD_PREPARE", tabId: 7, id: track.id });
+  assert.equal(prepared.ok, true);
+  assert.equal(prepared.text, VTT);
+  assert.equal(prepared.partial, false);
+  const saved = await h.message({ type: "NYANKAT_DOWNLOAD_SAVE", tabId: 7, id: track.id });
+  assert.equal(saved.ok, true);
+  assert.equal(h.downloads[0].filename, "Episode _ One - en.vtt");
+  assert.equal(Buffer.from(h.downloads[0].url.split(",")[1], "base64").toString("utf8"), VTT);
+  assert.deepEqual(h.frameRequests.map(request => [request.message.url, request.message.parentUrl, request.context.documentId]), [
+    [original, original, "frame-3"], [proxy, proxy, "frame-3"],
+    [original, original, "frame-3"], [proxy, proxy, "frame-3"]
+  ]);
+  assert.equal(h.fetches.length, 0);
+});
+
+test("AnimeX fallback keeps different captions, documents, frames and representations separate", async t => {
+  const original = "https://cdn.example/english.vtt";
+  const proxy = animexProxy(original);
+  for (const [name, changes, sender] of [
+    ["Forced", { url: animexProxy("https://cdn.example/english-forced.vtt") }, ANIMEX],
+    ["CC", { url: animexProxy("https://cdn.example/english-cc.vtt") }, ANIMEX],
+    ["frame", {}, { ...ANIMEX, frameId: 4, documentId: "frame-4" }],
+    ["document", {}, { ...ANIMEX, documentId: "other-document" }],
+    ["representation", { representationId: "other-rendition" }, ANIMEX],
+    ["malformed", { url: "https://cdnx.aniwatchtv.site/uwu/invalid" }, ANIMEX],
+    ["unrelated player", {}, { ...ANIMEX, url: "https://player.example/embed" }]
+  ]) {
+    const h = await harness({
+      frameRead: message => message.url === original ? null : { ok: true, text: VTT },
+      fetch: async () => new Response("Forbidden", { status: 403 })
+    });
+    t.after(() => h.close());
+    await h.message({ type: "NYANKAT_DOWNLOAD_DETECTED", tracks: [{ url: original, label: "English", language: "en" }] }, ANIMEX);
+    const track = (await h.message({ type: "NYANKAT_DOWNLOAD_LIST", tabId: 7 })).tracks[0];
+    await h.message({ type: "NYANKAT_DOWNLOAD_DETECTED", tracks: [{ url: proxy, label: "English", language: "en", ...changes }] }, sender);
+    const result = await h.message({ type: "NYANKAT_DOWNLOAD_SAVE", tabId: 7, id: track.id });
+    assert.equal(result.reason, "http_403", name);
+    assert.deepEqual(h.frameRequests.map(request => request.message.url), [original], name);
+    assert.equal(h.downloads.length, 0, name);
+  }
+});
+
+test("a direct caption alias cannot replace a descendant playlist segment", async t => {
+  const original = "https://cdn.example/english.vtt";
+  const proxy = animexProxy(original);
+  const segment = "https://cdn.example/part.vtt";
+  const h = await harness({
+    frameRead: message => message.url === original
+      ? { ok: true, text: "#EXTM3U\n#EXTINF:5,\npart.vtt\n#EXT-X-ENDLIST" }
+      : message.url === proxy ? { ok: true, text: VTT } : null,
+    fetch: async () => new Response("Forbidden", { status: 403 })
+  });
+  t.after(() => h.close());
+  await h.message({ type: "NYANKAT_DOWNLOAD_DETECTED", tracks: [{ url: original }, { url: proxy }] }, ANIMEX);
+  const track = (await h.message({ type: "NYANKAT_DOWNLOAD_LIST", tabId: 7 })).tracks[0];
+  const result = await h.message({ type: "NYANKAT_DOWNLOAD_PREPARE", tabId: 7, id: track.id });
+  assert.equal(result.reason, "http_403");
+  assert.deepEqual(h.frameRequests.map(request => request.message.url), [original, segment]);
+  assert.deepEqual(h.fetches.map(request => request.url), [segment]);
 });
 
 test("page cannot request a download or a cross-tab listing", async t => {

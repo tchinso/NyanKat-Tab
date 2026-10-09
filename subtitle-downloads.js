@@ -115,20 +115,35 @@
     if (!urlAllowed(url, true)) throw new Error("invalid_url");
     // Parent player configuration can expose the same caption as its embedded
     // player. That iframe may hold the body or supply the CDN's required origin.
-    const frames = [context];
-    const owners = new Set([contextKey(context)]);
+    const parentUrl = context.url || "";
+    const reads = [{ owner: context, url, parentUrl }];
+    const owners = new Set([contextKey(context) + ":" + url]);
+    const selectedUrl = context.url || url;
+    const identity = engine.captionIdentity(selectedUrl, context.pageUrl);
     for (const track of getState(tabId).tracks) {
-      if (track.url !== (context.url || url) ||
-          (track.representationId || "") !== (context.representationId || "") || owners.has(contextKey(track))) continue;
-      owners.add(contextKey(track));
-      frames.push(track);
+      if ((track.representationId || "") !== (context.representationId || "")) continue;
+      let readUrl = url;
+      let readParent = parentUrl;
+      if (track.url !== selectedUrl) {
+        // AnimeX exposes the same caption through an encoded player proxy.
+        // Only a proven alias in this document can replace a direct file read;
+        // never substitute another language, rendition, or playlist segment.
+        if (url !== selectedUrl || contextKey(track) !== contextKey(context) ||
+            engine.captionIdentity(track.url, track.pageUrl) !== identity) continue;
+        readUrl = track.url;
+        readParent = track.url;
+      }
+      const key = contextKey(track) + ":" + readUrl;
+      if (owners.has(key)) continue;
+      owners.add(key);
+      reads.push({ owner: track, url: readUrl, parentUrl: readParent });
     }
-    for (const owner of frames) {
+    for (const read of reads) {
       if (signal?.aborted) throw new Error("navigation_changed");
-      const cached = await sendFrame(tabId, owner, { type: "NYANKAT_DOWNLOAD_READ", url, allowFetch, parentUrl: context.url || "" });
+      const cached = await sendFrame(tabId, read.owner, { type: "NYANKAT_DOWNLOAD_READ", url: read.url, allowFetch, parentUrl: read.parentUrl });
       if (signal?.aborted) throw new Error("navigation_changed");
       if (cached && cached.ok && typeof cached.text === "string" && cached.text.length <= MAX_BYTES) {
-        return { text: cached.text, url, contentType: cached.contentType || "", partial: cached.partial === true };
+        return { text: cached.text, url: read.url, contentType: cached.contentType || "", partial: cached.partial === true };
       }
     }
     if (!/^https?:/.test(url)) throw new Error("page_resource_unavailable");

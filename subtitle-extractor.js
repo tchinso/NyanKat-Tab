@@ -34,6 +34,52 @@
     } catch { return null; }
   }
 
+  function captionIdentity(url, pageUrl) {
+    // AnimeX's native tracks encode the original caption URL and its required
+    // referrer in a proxy URL. Identity must come from that exact URL, never
+    // from matching labels or languages (which can have multiple renditions).
+    if (typeof url !== "string" || url.length > 16448) return url;
+    try {
+      const page = new URL(pageUrl);
+      const proxy = new URL(url);
+      if (page.protocol !== "https:" || page.hostname !== "plyr.animex.one" ||
+          proxy.origin !== "https://cdnx.aniwatchtv.site" || proxy.username || proxy.password ||
+          proxy.search || proxy.hash) return url;
+      const token = proxy.pathname.match(/^\/uwu\/([A-Za-z0-9_-]{1,16384})$/)?.[1];
+      if (!token || token.length % 4 === 1) return url;
+      const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+      const key = "10b06cdc1ca48c9fb0b94af97cc040cf";
+      const bytes = new Uint8Array(Math.floor(token.length * 6 / 8));
+      let buffer = 0;
+      let bits = 0;
+      let position = 0;
+      for (const character of token) {
+        buffer = (buffer << 6) | alphabet.indexOf(character);
+        bits += 6;
+        if (bits >= 8) {
+          bits -= 8;
+          bytes[position] = ((buffer >>> bits) & 255) ^ key.charCodeAt(position % key.length);
+          position++;
+          buffer &= (1 << bits) - 1;
+        }
+      }
+      // Base64url's unused bits must be zero. Strict URI decoding also rejects
+      // malformed UTF-8 without requiring atob or browser-only globals.
+      if (buffer) return url;
+      const fields = decodeURIComponent(Array.from(bytes, byte => "%" + byte.toString(16).padStart(2, "0")).join("")).split("\u0000");
+      if (fields.length !== 2 && fields.length !== 3) return url;
+      const validHttp = value => {
+        if (!/^https?:\/\//.test(value) || /[\s<>\u0000-\u001f\u007f]/.test(value)) return false;
+        const parsed = new URL(value);
+        return !!parsed.hostname && !parsed.username && !parsed.password && parsed.href === value;
+      };
+      if (!validHttp(fields[0]) || !validHttp(fields[1]) ||
+          !SUBTITLE_EXTENSIONS.test(new URL(fields[0]).pathname) ||
+          (fields.length === 3 && (!fields[2] || /[\u0000-\u001f\u007f]/.test(fields[2])))) return url;
+      return fields[0];
+    } catch { return url; }
+  }
+
   function guessFormat(url, hint = "") {
     let path = String(url || "");
     try { path = decodeURIComponent(new URL(path).pathname); } catch { /* An incomplete URL can still have an extension. */ }
@@ -742,7 +788,7 @@
     return cuesToVtt(cues);
   }
 
-  const api = Object.freeze({ discover, inspectText, parseHls, parseDash, parseCues, cuesToVtt, exportVtt, guessFormat, resolveUrl });
+  const api = Object.freeze({ discover, inspectText, parseHls, parseDash, parseCues, cuesToVtt, exportVtt, guessFormat, resolveUrl, captionIdentity });
   globalThis.NyanKatSubtitleExtractor = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();
