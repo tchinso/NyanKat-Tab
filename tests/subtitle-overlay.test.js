@@ -72,7 +72,14 @@ async function harness(options = {}) {
   document.append(document.documentElement);
   document.createElement = tag => new Element(tag);
   const video = new Video();
-  document.documentElement.append(video);
+  let videoRoot = document.documentElement;
+  for (let depth = 0; depth < (options.shadowDepth || 0); depth += 1) {
+    const host = new Element("media-player");
+    videoRoot.append(host);
+    host.shadowRoot = new Element("shadow-root");
+    videoRoot = host.shadowRoot;
+  }
+  videoRoot.append(video);
   const frames = new Map();
   const fontRequests = [];
   const translationPorts = [];
@@ -234,6 +241,20 @@ function loadTranslated(h, sourceLanguage = "en") {
     b64: Buffer.from("1\n00:00:01,000 --> 00:00:03,000\nPlastic lid\nsecond line\n\n2\n00:00:05,000 --> 00:00:07,000\nNext cue").toString("base64")
   });
 }
+
+test("videos in nested open shadow roots are discovered and accept translated subtitles", async () => {
+  const h = await harness({ embedded: true, shadowDepth: 2 });
+  assert.equal(h.document.querySelector("video"), null, "ordinary document selectors cannot find the player");
+  const ping = h.message("NYANKAT_SUBTITLE_PING");
+  assert.equal(ping.videos.length, 1);
+  assert.equal(ping.videos[0].id, "video-1");
+  assert.equal(loadTranslated(h).ok, true);
+  const port = h.translationPorts[0];
+  const request = port.messages.find(message => message.type === "translate");
+  assert.equal(request.sourceLanguage, "en");
+  port.onMessage.emit({ type: "done", requestId: request.requestId, text: "번역된 자막" });
+  assert.equal(h.layer("fill").textContent, "번역된 자막");
+});
 
 test("streaming translation applies the saved dictionary to all text layers and updates rules live", async () => {
   const h = await harness({ saved: { subtitlePostprocessDictionary: "플라스틱 뚜껑=플라흐타" } });

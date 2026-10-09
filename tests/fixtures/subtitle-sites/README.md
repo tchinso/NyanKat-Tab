@@ -2,6 +2,8 @@
 
 Observed on **2026-10-04 (Asia/Seoul)** using the ten episode URLs supplied for this task. These observations verify real site structures and selected subtitle responses. They **do not** establish that an installed build of the extension downloaded subtitles from all ten sites.
 
+See the [2026-10-10 installed-extension verification](verification-2026-10-10.md) for extension **1.3.3** extraction, actual downloads, and native Korean overlay translation checks, with browser-specific limits for all ten sites. The observations below retain their original date and scope.
+
 `observed-mechanisms.json` contains sanitized structural examples. URLs in those examples use `example.test`; opaque signatures, account/session credentials, and actual episode subtitle text are excluded.
 
 | Site | Observed mechanism | Verification and remaining limit |

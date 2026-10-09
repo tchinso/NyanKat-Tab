@@ -662,7 +662,20 @@
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), 18000) : 0;
     try {
-      const response = await Reflect.apply(originalFetch, window, [url, { credentials: "include", ...(controller ? { signal: controller.signal } : {}) }]);
+      const fetchCaption = credentials => Reflect.apply(originalFetch, window, [url, {
+        credentials, ...(controller ? { signal: controller.signal } : {})
+      }]);
+      let response;
+      try {
+        response = await fetchCaption("include");
+      } catch (error) {
+        // Public caption CDNs often allow Origin:* but reject credentialed
+        // requests. Keep session cookies where supported and retry only the
+        // cross-origin network/CORS failure with the browser's default mode.
+        if (error?.name !== "TypeError" || controller?.signal.aborted ||
+            requestGeneration !== generation || new URL(url).origin === new URL(location.href).origin) throw error;
+        response = await fetchCaption("same-origin");
+      }
       if (!response.ok) return { ok: false, error: "captions-http-" + response.status };
       const text = await readBoundedResponse(response);
       if (requestGeneration !== generation) return { ok: false, error: "captions-page-changed" };

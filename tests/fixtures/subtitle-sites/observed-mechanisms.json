@@ -102,6 +102,7 @@
         {"url": "https://cdn.example.test/subtitles/episode/english-cc.srt", "language": "English (CC)", "format": "srt", "default": false}
       ]
     },
+    "flixcloudInlineConfiguration": "const playerConfig = {subtitles:[{url:'https://cdn.example.test/subtitles/english.ass',language:'English (Track 3 (ENG))',format:'ass',default:true},{url:'https://cdn.example.test/subtitles/english-cc.srt',language:'English (CC)',format:'srt',default:false}],callback:shouldNeverRun()};",
     "anizoneConfiguration": {
       "src": "https://cdn.example.test/video/master.m3u8",
       "storyboard": "https://cdn.example.test/video/storyboard.vtt",
@@ -115,6 +116,12 @@
       "data": {"uri": {"stream": "https://cdn.example.test/video/manifest.mpd", "subtitles": {"en-US": "https://cdn.example.test/subtitles/english.ass", "de-DE": "https://cdn.example.test/subtitles/german.ass"}}}
     },
     "nexusSubtitleTrack": {"id": "english", "src": "https://cdn.example.test/episode/english.ass", "label": "English", "srcLang": "en", "type": "ass"},
+    "miruroMessagePortSession": {
+      "protocol": "strmcx/v1",
+      "type": "command",
+      "command": "set-session",
+      "payload": {"session": {"tracks": [{"src": "https://cdn.example.test/captions/opaque-object.jpeg", "label": "English", "language": "en", "kind": "subtitles"}]}}
+    },
     "extensionlessNativeTrack": {"src": "https://cdn.example.test/v1/object/opaque-token", "kind": "subtitles", "label": "English CC (Dub)", "srclang": "en"},
     "misleadingMimeSubtitle": {"url": "https://cdn.example.test/uwu/opaque-path", "contentType": "image/jpeg", "body": "WEBVTT\n\n00:00.000 --> 00:01.000\nSynthetic verification cue.\n"}
   }

@@ -86,6 +86,62 @@ test("JASSUB worker messages expose opaque subUrl and subtitle URL config fields
   assert.deepEqual(tracks.map(track => track.url), [1, 2, 3, 4].map(id => `https://cdn.example/get?id=${id}`));
 });
 
+test("MessagePort sessions preserve explicitly typed captions disguised as image URLs", () => {
+  const fixtures = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "subtitle-sites", "observed-mechanisms.json"), "utf8")).structuralFixtures;
+  const tracks = extractor.discover(fixtures.miruroMessagePortSession, "https://watch.example.test/episode/1");
+  assert.equal(tracks.length, 1);
+  assert.equal(tracks[0].url, "https://cdn.example.test/captions/opaque-object.jpeg");
+  assert.equal(tracks[0].label, "English");
+  assert.equal(tracks[0].language, "en");
+  for (const extension of ["jpg", "jpeg", "png", "gif", "webp", "avif"]) {
+    const url = "https://cdn.example.test/opaque-object." + extension;
+    assert.equal(extractor.discover({ tracks: [{ src: url, kind: "captions", language: "en" }] }, BASE).length, 1, extension);
+    assert.equal(extractor.discover({ tracks: [{ src: url, label: "English", language: "en" }] }, BASE).length, 0, "untyped " + extension);
+    assert.equal(extractor.discover({ subtitles: [{ src: url }] }, BASE).length, 0, "untyped subtitle container " + extension);
+    assert.equal(extractor.discover(`<track src="${url}" kind="subtitles" label="English" srclang="en">`, BASE)[0]?.language, "en", "typed HTML track " + extension);
+  }
+  assert.equal(extractor.discover({ tracks: [
+    { src: "/poster.jpeg", kind: "subtitles" },
+    { src: "/thumbnails.jpeg", kind: "captions" },
+    { src: "/opaque-object.jpeg", kind: "chapters" },
+    { src: "/opaque-object.jpeg", kind: "metadata" },
+    { src: "/opaque-object.jpeg", kind: "image" },
+    { src: "/movie.mp4", kind: "subtitles" },
+    { src: "javascript:alert(1)", kind: "captions" }
+  ] }, BASE).length, 0);
+  assert.equal(extractor.inspectText("\xff\xd8\xff\xe0JFIF\x00opaque image bytes", "https://cdn.example.test/opaque-object.jpeg", "image/jpeg"), null);
+  assert.equal(extractor.inspectText(vtt("00:01.000 --> 00:02.000\nSynthetic verification cue."), tracks[0].url, "text/vtt").format, "vtt");
+});
+
+test("inline JavaScript caption data preserves language labels without evaluating expressions", () => {
+  const fixtures = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "subtitle-sites", "observed-mechanisms.json"), "utf8")).structuralFixtures;
+  const tracks = extractor.discover(fixtures.flixcloudInlineConfiguration, BASE);
+  assert.equal(tracks.length, 2);
+  assert.equal(tracks[0].label, "English (Track 3 (ENG))");
+  assert.equal(tracks[0].language, "English (Track 3 (ENG))");
+  assert.equal(tracks[1].label, "English (CC)");
+  assert.equal(tracks[1].format, "srt");
+  assert.equal(extractor.discover("init({ captions: [{file: '/en.vtt', label: 'English', language: 'en',},], callback: function () { throw new Error('never execute'); } });", BASE)[0].language, "en");
+  assert.equal(extractor.discover('player({"textTracks": [{src: "/ja.vtt", label: "Japanese", language: "ja"}]})', BASE)[0].language, "ja");
+  let executed = false;
+  globalThis.__nyankatLiteralProbe = () => { executed = true; };
+  try {
+    extractor.discover("player({subtitles: [{url: '/en.vtt', label: __nyankatLiteralProbe()}]})", BASE);
+    extractor.discover("player({subtitles: [{get url() { __nyankatLiteralProbe(); return '/en.vtt'; }}]})", BASE);
+    assert.equal(executed, false);
+  } finally { delete globalThis.__nyankatLiteralProbe; }
+  assert.equal(extractor.discover("player({subtitles: [{url:'/en.vtt', language:'en', __proto__: {polluted: true}}]})", BASE)[0].language, "en");
+  assert.equal({}.polluted, undefined);
+});
+
+test("caption discovery excludes renderer scripts and fonts even under subtitle metadata", () => {
+  for (const extension of ["js", "mjs", "cjs", "wasm", "woff", "woff2", "ttf", "otf"]) {
+    assert.equal(extractor.discover({ subtitles: [{ url: "/subtitles/renderer." + extension, kind: "subtitles" }] }, BASE).length, 0, extension);
+  }
+  assert.equal(extractor.discover({ subUrl: "/subtitles-octopus-worker.js" }, BASE).length, 0);
+  assert.equal(extractor.discover({ subtitles: [{ url: "/en.vtt?asset=renderer.js", kind: "subtitles" }] }, BASE).length, 1);
+});
+
 test("observed anime player metadata fixtures enumerate captions, including Astro tuples and Onsen URI containers", () => {
   const fixtures = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "subtitle-sites", "observed-mechanisms.json"), "utf8")).structuralFixtures;
   for (const [name, count] of [["flixcloudConfiguration", 2], ["anizoneConfiguration", 1], ["astroTupleProperties", 1], ["onsenResponse", 2], ["nexusSubtitleTrack", 1], ["extensionlessNativeTrack", 1]]) {

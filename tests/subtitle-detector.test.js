@@ -63,7 +63,7 @@ function createEnvironment(options = {}) {
     addEventListener(type, listener) { if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(listener); },
     fetch: async (url, config) => {
       requests.push({ url, config });
-      const text = typeof options.fetchText === "function" ? await options.fetchText(url) : options.fetchText || VTT;
+      const text = typeof options.fetchText === "function" ? await options.fetchText(url, config) : options.fetchText || VTT;
       const response = new Response(text, { headers: { "content-type": options.contentType || "text/vtt" } });
       Object.defineProperty(response, "url", { value: String(url) });
       return response;
@@ -203,6 +203,34 @@ test("explicit page-origin fetching is allowed only for discovered tracks", asyn
   const response = await environment.read(url, { allowFetch: true });
   assert.equal(response.text, VTT);
   assert.equal(environment.requests[0].config.credentials, "include");
+});
+
+test("public cross-origin captions retry without cookies after credentialed CORS rejection", async () => {
+  const url = "https://cdn.example/captions/opaque-object.jpeg";
+  const environment = createEnvironment({ trackElements: [domTrack(url)], fetchText(_url, config) {
+    if (config.credentials === "include") throw new TypeError("Failed to fetch");
+    return VTT;
+  } });
+  environment.flushTimers();
+  const response = await environment.read(url, { allowFetch: true });
+  assert.equal(response.ok, true);
+  assert.equal(response.text, VTT);
+  assert.deepEqual(environment.requests.map(request => request.config.credentials), ["include", "same-origin"]);
+  assert.equal((await environment.read(url)).text, VTT);
+  assert.equal(environment.requests.length, 2, "successful fallback is cached");
+});
+
+test("same-origin failures and aborted caption requests do not drop credentials or retry", async () => {
+  for (const [url, error] of [
+    ["https://watch.example/sub.vtt", new TypeError("Failed to fetch")],
+    ["https://cdn.example/sub.vtt", Object.assign(new Error("Aborted"), { name: "AbortError" })]
+  ]) {
+    const environment = createEnvironment({ trackElements: [domTrack(url)], fetchText() { throw error; } });
+    environment.flushTimers();
+    assert.equal((await environment.read(url, { allowFetch: true })).ok, false);
+    assert.equal(environment.requests.length, 1);
+    assert.equal(environment.requests[0].config.credentials, "include");
+  }
 });
 
 test("validated HLS descendants can be fetched without displaying individual segments", async () => {

@@ -76,14 +76,21 @@
       if (/thumbnail|storyboard|sprite|chapter/i.test([raw.kind, raw.label, raw.url].join(" "))) continue;
       const key = contextKey(context) + ":" + raw.url + ":" + (raw.representationId || "");
       const existing = state.tracks.find((track) => track.key === key);
+      const label = String(raw.label || "").trim().slice(0, 160);
+      const language = String(raw.language || "").trim().slice(0, 40);
+      const format = String(raw.format || "").trim().slice(0, 16);
+      const source = String(raw.source || "").trim().slice(0, 80);
+      const genericSource = !source || /^(?:페이지|page|network|네트워크 응답|resource-timing)$/i.test(source);
       const track = {
         id: existing ? existing.id : "sub-" + Date.now().toString(36) + "-" + (++sequence),
         key, url: raw.url, frameId: context.frameId, documentId: context.documentId || "",
-        pageUrl: context.pageUrl || "", label: String(raw.label || "자막").slice(0, 160),
-        language: String(raw.language || "").slice(0, 40),
-        format: String(raw.format || "").slice(0, 16),
+        // A response proves the URL exists but usually has less metadata than
+        // the player's named track. Rediscovery must not erase that identity.
+        pageUrl: context.pageUrl || "", label: ((!label || label === "자막") && existing?.label) || label || "자막",
+        language: language || existing?.language || "",
+        format: format || existing?.format || "",
         kind: ["hls", "dash", "cues"].includes(raw.kind) ? raw.kind : "file",
-        source: String(raw.source || "페이지").slice(0, 80),
+        source: (genericSource && existing?.source) || source || "페이지",
         representationId: raw.representationId ? String(raw.representationId).slice(0, 200) : "",
         partial: raw.partial === true || (/^nyankat-cues:/.test(raw.url) && raw.complete !== true),
         verified: raw.verified === true || (existing && existing.verified) || false
@@ -106,10 +113,23 @@
 
   async function readResource(tabId, context, url, signal, allowFetch = false) {
     if (!urlAllowed(url, true)) throw new Error("invalid_url");
-    const cached = await sendFrame(tabId, context, { type: "NYANKAT_DOWNLOAD_READ", url, allowFetch, parentUrl: context.url || "" });
-    if (signal && signal.aborted) throw new Error("navigation_changed");
-    if (cached && cached.ok && typeof cached.text === "string" && cached.text.length <= MAX_BYTES) {
-      return { text: cached.text, url, contentType: cached.contentType || "", partial: cached.partial === true };
+    // Parent player configuration can expose the same caption as its embedded
+    // player. That iframe may hold the body or supply the CDN's required origin.
+    const frames = [context];
+    const owners = new Set([contextKey(context)]);
+    for (const track of getState(tabId).tracks) {
+      if (track.url !== (context.url || url) ||
+          (track.representationId || "") !== (context.representationId || "") || owners.has(contextKey(track))) continue;
+      owners.add(contextKey(track));
+      frames.push(track);
+    }
+    for (const owner of frames) {
+      if (signal?.aborted) throw new Error("navigation_changed");
+      const cached = await sendFrame(tabId, owner, { type: "NYANKAT_DOWNLOAD_READ", url, allowFetch, parentUrl: context.url || "" });
+      if (signal?.aborted) throw new Error("navigation_changed");
+      if (cached && cached.ok && typeof cached.text === "string" && cached.text.length <= MAX_BYTES) {
+        return { text: cached.text, url, contentType: cached.contentType || "", partial: cached.partial === true };
+      }
     }
     if (!/^https?:/.test(url)) throw new Error("page_resource_unavailable");
     const controller = new AbortController();

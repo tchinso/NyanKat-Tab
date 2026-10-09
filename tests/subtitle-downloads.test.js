@@ -79,6 +79,41 @@ test("click saves validated UTF-8 subtitle in the worker with sanitized filename
   assert.equal(h.frameRequests[0].message.allowFetch, true);
 });
 
+test("a later raw network response preserves named track metadata and the download filename", async t => {
+  const h = await harness({ frameRead: () => ({ ok: true, text: VTT, contentType: "text/vtt" }) });
+  t.after(() => h.close());
+  const track = await h.detect({ url: "https://cdn.example/opaque.jpeg", source: "html-track" });
+  h.chrome.webRequest.onHeadersReceived.emit({
+    tabId: 7, frameId: 3, documentId: "frame-3", documentUrl: PAGE.url,
+    statusCode: 200, url: track.url, responseHeaders: [{ name: "Content-Type", value: "text/vtt" }]
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  await h.message({ type: "NYANKAT_DOWNLOAD_DETECTED", tracks: [{ url: track.url, label: "자막", source: "network", verified: true }] }, PAGE);
+  const listed = (await h.message({ type: "NYANKAT_DOWNLOAD_LIST", tabId: 7 })).tracks;
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].id, track.id);
+  assert.equal(listed[0].label, "English");
+  assert.equal(listed[0].language, "en");
+  assert.equal(listed[0].format, "vtt");
+  assert.equal(listed[0].source, "html-track");
+  assert.equal(listed[0].verified, true, "body verification upgrades the existing named track");
+  const prepared = await h.message({ type: "NYANKAT_DOWNLOAD_PREPARE", tabId: 7, id: track.id });
+  assert.equal(prepared.ok, true);
+  assert.equal(prepared.filename, "Episode _ One - en.vtt");
+});
+
+test("player metadata enriches an earlier generic discovery without losing verification", async t => {
+  const h = await harness(); t.after(() => h.close());
+  const initial = await h.detect({ label: "자막", language: "", format: "", source: "네트워크 응답", verified: true });
+  const enriched = await h.detect({ label: "English", language: "en", format: "vtt", source: "player-config" });
+  assert.equal(enriched.id, initial.id);
+  assert.equal(enriched.label, "English");
+  assert.equal(enriched.language, "en");
+  assert.equal(enriched.format, "vtt");
+  assert.equal(enriched.source, "player-config");
+  assert.equal(enriched.verified, true);
+});
+
 test("originating frame cache avoids cross-origin CDN requests and retains ASS styles", async t => {
   const ass = "[Script Info]\nTitle: demo\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\b1}Hello";
   const h = await harness({ frameRead: () => ({ ok: true, text: ass, contentType: "text/plain" }) }); t.after(() => h.close());
@@ -88,6 +123,37 @@ test("originating frame cache avoids cross-origin CDN requests and retains ASS s
   assert.equal(result.text, ass);
   assert.equal(result.format, "ass");
   assert.equal(h.fetches.length, 0);
+});
+
+test("parent-discovered captions use the matching embedded player's origin before worker fetching", async t => {
+  const h = await harness({ frameRead: (_message, context) => context.documentId === "frame-3"
+    ? { ok: true, text: VTT, contentType: "text/vtt" } : null });
+  t.after(() => h.close());
+  const top = { ...PAGE, frameId: 0, documentId: "top", url: "https://watch.example/episode" };
+  const url = "https://cdn.example/opaque-object.jpeg";
+  await h.message({ type: "NYANKAT_DOWNLOAD_DETECTED", tracks: [{ url, label: "English", language: "en" }] }, top);
+  const parent = (await h.message({ type: "NYANKAT_DOWNLOAD_LIST", tabId: 7 })).tracks[0];
+  await h.detect({ url });
+  const result = await h.message({ type: "NYANKAT_DOWNLOAD_SAVE", tabId: 7, id: parent.id });
+  assert.equal(result.ok, true);
+  assert.equal(h.downloads.length, 1);
+  assert.deepEqual(h.frameRequests.filter(request => request.message.type === "NYANKAT_DOWNLOAD_READ")
+    .map(request => request.context.documentId), ["top", "frame-3"]);
+  assert.equal(h.fetches.length, 0);
+});
+
+test("caption fallback cannot use a different URL or DASH representation from another frame", async t => {
+  const h = await harness({ frameRead: () => null });
+  t.after(() => h.close());
+  const selected = await h.detect({ representationId: "english" });
+  const top = { ...PAGE, frameId: 0, documentId: "top" };
+  await h.message({ type: "NYANKAT_DOWNLOAD_DETECTED", tracks: [
+    { url: selected.url, representationId: "spanish", language: "es" },
+    { url: "https://cdn.example/other.vtt", representationId: "english", language: "en" }
+  ] }, top);
+  assert.equal((await h.message({ type: "NYANKAT_DOWNLOAD_PREPARE", tabId: 7, id: selected.id })).ok, true);
+  assert.equal(h.frameRequests.filter(request => request.message.type === "NYANKAT_DOWNLOAD_READ").length, 1);
+  assert.equal(h.fetches.length, 1);
 });
 
 test("page cannot request a download or a cross-tab listing", async t => {

@@ -85,6 +85,76 @@
     return value;
   }
 
+  function parseDataLiteral(source, start) {
+    // Accept data-only JavaScript object/array literals, never expressions,
+    // getters, function calls, or template interpolation from player scripts.
+    let position = start;
+    let nodes = 0;
+    const whitespace = () => { while (/\s/.test(source[position] || "") && position < source.length) position++; };
+    function string() {
+      const quote = source[position++];
+      let value = "";
+      while (position < source.length) {
+        const character = source[position++];
+        if (character === quote) return value;
+        if (character !== "\\") { value += character; continue; }
+        const escaped = source[position++];
+        if (escaped === "u" || escaped === "x") {
+          const length = escaped === "u" ? 4 : 2;
+          const digits = source.slice(position, position + length);
+          if (digits.length !== length || !/^[\da-f]+$/i.test(digits)) throw new Error("invalid-string");
+          value += String.fromCharCode(Number.parseInt(digits, 16));
+          position += length;
+        } else if (escaped === "\n") { /* JavaScript string continuation. */ }
+        else if (escaped === "\r") { if (source[position] === "\n") position++; }
+        else if (escaped !== undefined) value += ({ n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", "0": "\0" })[escaped] ?? escaped;
+        else throw new Error("invalid-string");
+      }
+      throw new Error("unterminated-string");
+    }
+    function read(depth = 0) {
+      if (++nodes > MAX_NODES || depth > 24) throw new Error("literal-limit");
+      whitespace();
+      const character = source[position];
+      if (character === '"' || character === "'") return string();
+      if (character === "[" || character === "{") {
+        position++;
+        const array = character === "[";
+        const end = array ? "]" : "}";
+        const value = array ? [] : Object.create(null);
+        whitespace();
+        while (source[position] !== end) {
+          if (array) value.push(read(depth + 1));
+          else {
+            whitespace();
+            let key;
+            if (source[position] === '"' || source[position] === "'") key = string();
+            else {
+              const match = source.slice(position).match(/^[a-z_$][\w$]*/i);
+              if (!match) throw new Error("invalid-key");
+              key = match[0];
+              position += key.length;
+            }
+            whitespace();
+            if (source[position++] !== ":") throw new Error("not-data");
+            value[key] = read(depth + 1);
+          }
+          whitespace();
+          if (source[position] === end) break;
+          if (source[position++] !== ",") throw new Error("not-data");
+          whitespace();
+        }
+        position++;
+        return value;
+      }
+      const scalar = source.slice(position).match(/^(?:true|false|null)(?![\w$])|^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\w$.])/);
+      if (!scalar) throw new Error("not-data");
+      position += scalar[0].length;
+      return JSON.parse(scalar[0]);
+    }
+    try { return { value: read(), end: position }; } catch { return null; }
+  }
+
   function discover(value, baseUrl) {
     const output = [];
     const seenUrls = new Set();
@@ -94,14 +164,18 @@
       const url = resolveUrl(value, baseUrl);
       const dedupKey = url + ":" + (context.representationId || "");
       if (!url || seenUrls.has(dedupKey) || output.length >= MAX_TRACKS) return;
+      if (/\.(?:[cm]?js|wasm|woff2?|ttf|otf)$/i.test(new URL(url).pathname)) return;
       const format = context.format && /^(?:vtt|srt|ass|ssa|ttml|dfxp|smi|sami|sbv|json|m3u8|mpd)$/i.test(context.format)
         ? ({ ssa: "ass", dfxp: "ttml", sami: "smi" })[context.format.toLowerCase()] || context.format.toLowerCase() : guessFormat(url, context.format || context.type);
       if (NEGATIVE_HINT.test(`${context.label || ""} ${context.kind || ""} ${context.type || ""} ${url}`)) return;
       const semantic = context.semantic || SEMANTIC_KIND.test(context.kind || "") || SEMANTIC_KIND.test(context.type || "");
       const explicit = SUBTITLE_EXTENSIONS.test(url) || /(?:^|\/)subtitles?(?:[/?_-]|$)|(?:^|\/)captions?(?:[/?_-]|$)/i.test(url);
       if (!semantic && !explicit && !["vtt", "srt", "ass", "ttml", "smi", "sbv"].includes(format)) return;
-      // Semantic track metadata permits opaque/signed endpoints, but never an obvious media file.
-      if (/\.(?:mp4|webm|mkv|mp3|m4a|aac|ts|m4s|jpg|jpeg|png|gif|webp|avif)(?:$|[?#])/i.test(url)) return;
+      // Some players disguise explicitly typed captions as image URLs. These
+      // candidates still need timed-caption body validation before exporting.
+      const explicitCaptionKind = /^(?:subtitles?|captions?)$/i.test(context.kind || "");
+      if (/\.(?:mp4|webm|mkv|mp3|m4a|aac|ts|m4s)(?:$|[?#])/i.test(url)
+        || (!explicitCaptionKind && /\.(?:jpg|jpeg|png|gif|webp|avif)(?:$|[?#])/i.test(url))) return;
       seenUrls.add(dedupKey);
       output.push({ url, label: String(context.label || context.language || "").slice(0, 200),
         language: String(context.language || "").slice(0, 80),
@@ -125,9 +199,18 @@
         // Native HTML track elements and quoted subtitle URLs in inline player configs.
         for (const match of source.matchAll(/<track\b([^>]*)>/gi)) {
           const attr = attributes(match[1]);
-          if (!attr.kind || /^(?:subtitles|captions)$/i.test(attr.kind)) add(attr.src, { semantic: true, label: attr.label, language: attr.srclang, source: "track" });
+          if (!attr.kind || /^(?:subtitles|captions)$/i.test(attr.kind)) add(attr.src, { semantic: true, kind: attr.kind || "subtitles", label: attr.label, language: attr.srclang, source: "track" });
         }
         const configSource = source.replace(/<track\b[^>]*>/gi, "");
+        const fields = /(?:^|[,{])\s*["']?(subtitles?|captions?|closedCaptions?|cc|textTracks?|subtitleTracks?|captionTracks?)["']?\s*:\s*/gi;
+        let field;
+        let literals = 0;
+        while ((field = fields.exec(configSource)) && literals++ < 64 && nodes < MAX_NODES) {
+          const literal = parseDataLiteral(configSource, fields.lastIndex);
+          if (!literal) continue;
+          visit({ [field[1]]: literal.value }, context, depth + 1);
+          fields.lastIndex = literal.end;
+        }
         for (const match of configSource.matchAll(/["']((?:https?:\/\/|\/|\.\.?\/)[^"'<>\s]{1,16384}?\.(?:vtt|srt|ass|ssa|ttml|dfxp|smi|sami|sbv)(?:[?#][^"'<>\s]*)?)["']/gi)) add(match[1], context);
         return;
       }

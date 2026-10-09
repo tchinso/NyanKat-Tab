@@ -46,7 +46,7 @@ The engine observes HTML tracks, loaded native cues, player configuration/JSON, 
 
 Each fetched resource is limited to 4 MiB; gathered subtitles are limited to 24 MiB. The engine validates timed content before saving, retries transient CDN errors, preserves the originating player context when reading captions, and clears stale discoveries on navigation. Sites that block a request may require enabling the desired caption language so the player loads it first.
 
-Run the automated checks with `node --test`. See [site validation](tests/fixtures/subtitle-sites/README.md) for observed player mechanisms and the limits of the live-site verification.
+Run the automated checks with `node --test`. See the [1.3.3 installed-extension verification](tests/fixtures/subtitle-sites/verification-2026-10-10.md) for extraction, actual downloads, native Korean overlays, and the remaining live-site limits across ten sites. Earlier [mechanism observations](tests/fixtures/subtitle-sites/README.md) document the sanitized player structures.
 
 ## Subtitle display styles
 
