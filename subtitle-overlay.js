@@ -19,6 +19,10 @@
   let idleDiscoveryQueued = false;
   let savedStyle = { ...DEFAULT_STYLE };
   let savedStyleRevision = 0;
+  let translationHost = null;
+  let nextTranslationRequest = 1;
+  let postprocessRevision = 0;
+  let postprocess = window.NyanKatSubtitlePostprocess?.compile("");
 
   function clampNumber(value, min, max, fallback) {
     const numberValue = Number(value);
@@ -141,7 +145,12 @@
       resizeObserver: null,
       mediaHandlers: null,
       frameUpdateId: 0,
-      frameUpdateKind: ""
+      frameUpdateKind: "",
+      sourceLanguage: "ko",
+      translationPort: null,
+      translationRequest: "",
+      translationStatus: null,
+      rawTranslatedText: null
     };
     recordsByVideo.set(video, record);
     recordsById.set(record.id, record);
@@ -154,6 +163,7 @@
     }
 
     stopCueUpdates(record);
+    disconnectTranslation(record);
     if (record.resizeObserver) {
       record.resizeObserver.disconnect();
       record.resizeObserver = null;
@@ -548,12 +558,114 @@
     }
 
     record.currentCueIndex = cueIndex;
+    record.rawTranslatedText = null;
     const text = cueIndex === -1 ? "" : record.cues[cueIndex].text;
+    setCueText(record, text);
+    cancelTranslation(record);
+    if (text.trim() && record.sourceLanguage !== "ko") {
+      requestTranslation(record, text);
+    }
+  }
+
+  function setCueText(record, text) {
+    if (!record.textLayers || !record.textBox) return;
     for (const layer of Object.values(record.textLayers)) {
       layer.textContent = text;
     }
     record.textBox.hidden = !text.trim();
     positionSubtitleText(record);
+  }
+
+  function setTranslatedCueText(record, text) {
+    record.rawTranslatedText = text;
+    setCueText(record, postprocess ? postprocess.apply(text) : text);
+  }
+
+  function cancelTranslation(record) {
+    if (record.translationRequest && record.translationPort) {
+      try { record.translationPort.postMessage({ type: "cancel", requestId: record.translationRequest }); } catch { /* Disconnected. */ }
+    }
+    record.translationRequest = "";
+  }
+
+  function disconnectTranslation(record) {
+    cancelTranslation(record);
+    const port = record.translationPort;
+    record.translationPort = null;
+    port?.disconnect();
+  }
+
+  function connectTranslation(record) {
+    if (record.translationPort) return record.translationPort;
+    try {
+      const port = chrome.runtime.connect({ name: "nyankat-subtitle-translation-client" });
+      record.translationPort = port;
+      port.onMessage.addListener((message) => {
+        if (record.translationPort !== port || !recordsById.has(record.id)) return;
+        if (message.type === "status") {
+          record.translationStatus = message.status;
+          if (["error", "unavailable"].includes(message.status?.state)) {
+            record.rawTranslatedText = null;
+            setCueText(record, record.cues[record.currentCueIndex]?.text || "");
+          }
+          return;
+        }
+        if (message.requestId !== record.translationRequest) return;
+        if (message.type === "update" || message.type === "done") {
+          setTranslatedCueText(record, String(message.text || ""));
+          if (message.type === "done") record.translationRequest = "";
+        } else if (message.type === "error") {
+          record.translationStatus = { state: "error", code: message.reason };
+          record.translationRequest = "";
+        }
+      });
+      port.onDisconnect.addListener(() => {
+        if (record.translationPort !== port) return;
+        record.translationPort = null;
+        record.translationRequest = "";
+        record.translationStatus = { state: "error", code: "translation_host_disconnected" };
+      });
+      port.postMessage({ type: "configure", sourceLanguage: record.sourceLanguage });
+      return port;
+    } catch {
+      record.translationStatus = { state: "unavailable", code: "translation_host_unavailable" };
+      return null;
+    }
+  }
+
+  function requestTranslation(record, text) {
+    const port = connectTranslation(record);
+    if (!port) return;
+    record.translationRequest = record.id + ":" + nextTranslationRequest++;
+    try {
+      port.postMessage({ type: "translate", requestId: record.translationRequest, sourceLanguage: record.sourceLanguage, text });
+    } catch {
+      disconnectTranslation(record);
+    }
+  }
+
+  function updateLanguage(record, value) {
+    const language = window.NyanKatSubtitleTranslation?.normalizeLanguage(value) || "ko";
+    if (language !== record.sourceLanguage) disconnectTranslation(record);
+    record.sourceLanguage = language;
+    if (language !== "ko") connectTranslation(record);
+    record.currentCueIndex = -2;
+    renderCue(record);
+  }
+
+  function ensureTranslationHost(restart = false) {
+    if (window.top !== window) return false;
+    if (translationHost?.isConnected && !restart) return true;
+    translationHost?.remove();
+    if (!document.documentElement) return false;
+    translationHost = document.createElement("iframe");
+    translationHost.className = "nyankat-subtitle-translation-host";
+    translationHost.title = "NyanKat 자막 번역 모델 준비";
+    translationHost.setAttribute("allow", "translator");
+    translationHost.src = chrome.runtime.getURL("subtitle-translation-host.html");
+    translationHost.hidden = true;
+    document.documentElement.append(translationHost);
+    return true;
   }
 
   function stopCueUpdates(record) {
@@ -621,7 +733,7 @@
 
   function updateOffset(record, offsetMs) {
     record.offsetMs = clampNumber(offsetMs, -MAX_OFFSET_MS, MAX_OFFSET_MS, record.offsetMs);
-    record.currentCueIndex = -1;
+    record.currentCueIndex = -2;
     renderCue(record);
     return record.offsetMs;
   }
@@ -632,6 +744,8 @@
       loaded: record.cues.length > 0,
       cueCount: record.cues.length,
       offsetMs: record.offsetMs,
+      sourceLanguage: record.sourceLanguage,
+      translationStatus: record.translationStatus,
       settings: { ...record.settings }
     };
   }
@@ -715,7 +829,9 @@
     }
 
     record.cues = cues;
-    record.currentCueIndex = -1;
+    disconnectTranslation(record);
+    record.sourceLanguage = window.NyanKatSubtitleTranslation?.normalizeLanguage(payload.sourceLanguage) || "ko";
+    record.currentCueIndex = -2;
     updateOffset(record, payload.offsetMs);
     updateStyle(record, payload.settings);
     renderCue(record);
@@ -725,6 +841,7 @@
 
   function unloadSubtitle(record) {
     stopCueUpdates(record);
+    disconnectTranslation(record);
     record.cues = [];
     record.currentCueIndex = -1;
     if (record.overlay) {
@@ -738,6 +855,22 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || typeof message.type !== "string") {
+      return;
+    }
+
+    if (message.type === "NYANKAT_SUBTITLE_TRANSLATION_HOST_ENSURE") {
+      sendResponse({ ok: ensureTranslationHost(message.restart === true) });
+      return;
+    }
+    if (message.type === "NYANKAT_SUBTITLE_TRANSLATION_HOST_VISIBILITY") {
+      if (window.top === window && translationHost) translationHost.hidden = message.visible !== true;
+      sendResponse({ ok: Boolean(translationHost) });
+      return;
+    }
+    if (message.type === "NYANKAT_SUBTITLE_TRANSLATION_HOST_REMOVE") {
+      translationHost?.remove();
+      translationHost = null;
+      sendResponse({ ok: true });
       return;
     }
 
@@ -770,6 +903,12 @@
       return;
     }
 
+    if (message.type === "NYANKAT_SUBTITLE_SET_LANGUAGE") {
+      updateLanguage(record, payload.sourceLanguage);
+      sendResponse({ ok: true, state: getState(record) });
+      return;
+    }
+
     if (message.type === "NYANKAT_SUBTITLE_UPDATE_STYLE") {
       updateStyle(record, payload.settings);
       sendResponse({ ok: true, state: getState(record) });
@@ -799,6 +938,10 @@
   }
 
   if (chrome.storage && chrome.storage.local) {
+    const dictionaryRevision = postprocessRevision;
+    void chrome.storage.local.get("subtitlePostprocessDictionary").then(result => {
+      if (dictionaryRevision === postprocessRevision) applyPostprocessDictionary(result.subtitlePostprocessDictionary);
+    }).catch(() => {});
     const revision = savedStyleRevision;
     void chrome.storage.local.get(["subtitleStyle", "subtitleFont"]).then((result) => {
       if (revision !== savedStyleRevision) {
@@ -809,12 +952,25 @@
     }).catch(() => {});
     if (chrome.storage.onChanged) {
       chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === "local" && changes.subtitlePostprocessDictionary) {
+          postprocessRevision += 1;
+          applyPostprocessDictionary(changes.subtitlePostprocessDictionary.newValue);
+        }
         if (areaName === "local" && changes.subtitleStyle) {
           savedStyleRevision += 1;
           savedStyle = normalizeStyle(changes.subtitleStyle.newValue);
           applySavedStyleToRecords(false);
         }
       });
+    }
+  }
+
+  function applyPostprocessDictionary(dictionary) {
+    postprocess = window.NyanKatSubtitlePostprocess?.compile(dictionary);
+    for (const record of recordsById.values()) {
+      if (record.sourceLanguage !== "ko" && record.rawTranslatedText !== null) {
+        setTranslatedCueText(record, record.rawTranslatedText);
+      }
     }
   }
 

@@ -57,6 +57,8 @@ class Element {
     for (const listener of this.listeners.get(event.type) || []) listener(event);
   }
   setAttribute(name, value) { this.attrs[name] = String(value); }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
   getAttribute(name) { return this.attrs[name] ?? null; }
   matches(selector) {
     const match = selector.match(/^([\w-]*)?(?:\[([^=\]]+)(?:=['"]?([^'"\]]+)['"]?)?\])?$/);
@@ -120,7 +122,7 @@ async function harness(options = {}) {
   const chrome = {
     runtime: { getURL: file => "chrome-extension://test/" + file },
     storage: { local: {
-      get: async () => options.read ? options.read() : plain(saved),
+      get: async keys => options.read && Array.isArray(keys) ? options.read() : plain(saved),
       set(data) { const copy = plain(data); writes.push(copy); Object.assign(saved, copy); return Promise.resolve(); }
     } },
     fontSettings: { getFontList: async () => [
@@ -137,15 +139,21 @@ async function harness(options = {}) {
         if (message.type === "NYANKAT_SUBTITLE_PING") {
           respond({ ok: true, videos: options.video ? [{ id: "video-1", width: 1280, height: 720, playing: true, inViewport: true }] : [] });
         } else {
-          respond({ ok: true, state: { settings: options.videoStyle || window.NyanKatSubtitleStyle.DEFAULT_STYLE, offsetMs: 0 } });
+          respond({ ok: true, state: { settings: options.videoStyle || window.NyanKatSubtitleStyle.DEFAULT_STYLE, offsetMs: 0, sourceLanguage: options.sourceLanguage || "ko" } });
         }
       }
     },
     webNavigation: { getAllFrames(_query, respond) { respond([{ frameId: 0, url: "https://example.test/video" }]); } }
   };
   class FontFace { constructor() {} async load() { return this; } }
-  const context = vm.createContext({ window, document, chrome, URL, FontFace, console });
+  class DataTransfer {
+    constructor() { this.files = []; this.items = { add: file => this.files.push(file) }; }
+  }
+  const context = vm.createContext({ window, document, chrome, URL, FontFace, console, File, DataTransfer,
+    btoa: value => Buffer.from(value, "binary").toString("base64") });
   vm.runInContext(styleSource, context);
+  vm.runInContext(fs.readFileSync(path.join(root, "subtitle-translation.js"), "utf8"), context);
+  vm.runInContext(fs.readFileSync(path.join(root, "subtitle-postprocess.js"), "utf8"), context);
   vm.runInContext(popupSource, context);
   await settle();
   const element = id => {
@@ -325,4 +333,63 @@ test("changing modes reveals their controls while retaining hidden style values 
   assert.equal(h.saved.subtitleStyle.outlineColor2, customStyle.outlineColor2);
   assert.equal(h.saved.subtitleStyle.bgBorderWidth, customStyle.bgBorderWidth);
   h.close();
+});
+
+test("source language choices pin the five requested languages and send changes to the selected video", async () => {
+  const h = await harness({ video: true });
+  assert.deepEqual(h.element("subtitleLanguage").options.slice(0, 5).map(option => option.value), ["ko", "en", "zh", "ja", "es"]);
+  assert.equal(h.element("subtitlePostprocessSettings").hidden, true);
+  await h.refresh();
+  h.edit("subtitleLanguage", "ja", "change");
+  await settle();
+  assert.equal(h.element("subtitlePostprocessSettings").hidden, false);
+  const request = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_SET_LANGUAGE");
+  assert.equal(request.message.payload.sourceLanguage, "ja");
+  h.edit("subtitleLanguage", "ko", "change");
+  assert.equal(h.element("subtitlePostprocessSettings").hidden, true);
+});
+
+test("extracted UTF-8 subtitle becomes the selected local file with English source language", async () => {
+  const h = await harness({ video: true });
+  const file = new File(["WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello"], "english.vtt");
+  assert.equal(await h.window.NyanKatSubtitlePopup.importExtractedSubtitle({ file, text: await file.text(), filename: file.name }), true);
+  assert.equal(h.element("subtitleFile").files[0], file);
+  assert.equal(h.element("subtitleEncoding").value, "utf-8");
+  assert.equal(h.element("subtitleLanguage").value, "en");
+  assert.equal(h.element("subtitlePostprocessSettings").hidden, false);
+  await h.refresh();
+  assert.equal(h.element("subtitleLanguage").value, "en", "video status preserves chosen source before applying file");
+  h.edit("videoSelect", h.element("videoSelect").value, "change");
+  await settle();
+  assert.equal(h.element("subtitleLanguage").value, "en", "choosing a video also preserves the imported file's source language");
+  h.element("loadSubtitle").dispatchEvent({ type: "click" });
+  await settle();
+  const request = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_LOAD");
+  assert.equal(request.message.payload.sourceLanguage, "en");
+  assert.equal(request.message.payload.filename, "english.vtt");
+  assert.equal(Buffer.from(request.message.payload.b64, "base64").toString(), await file.text());
+});
+
+test("postprocess dialog saves a reusable dictionary and cancel discards edits", async () => {
+  const saved = { subtitlePostprocessDictionary: "플라스틱 뚜껑=플라흐타" };
+  const h = await harness({ saved });
+  h.element("subtitlePostprocessSettings").dispatchEvent({ type: "click" });
+  await settle();
+  assert.equal(h.element("subtitlePostprocessDialog").open, true);
+  assert.equal(h.element("subtitlePostprocessDictionary").value, saved.subtitlePostprocessDictionary);
+  h.edit("subtitlePostprocessDictionary", "잘못된 형식");
+  h.element("subtitlePostprocessForm").dispatchEvent({ type: "submit", preventDefault() {} });
+  await settle();
+  assert.equal(h.element("subtitlePostprocessDialog").open, true);
+  assert.equal(saved.subtitlePostprocessDictionary, "플라스틱 뚜껑=플라흐타");
+  h.edit("subtitlePostprocessDictionary", "플라스틱 뚜껑=플라흐타\n이름=교정");
+  h.element("subtitlePostprocessForm").dispatchEvent({ type: "submit", preventDefault() {} });
+  await settle();
+  assert.equal(h.element("subtitlePostprocessDialog").open, false);
+  assert.equal(saved.subtitlePostprocessDictionary, "플라스틱 뚜껑=플라흐타\n이름=교정");
+  h.element("subtitlePostprocessSettings").dispatchEvent({ type: "click" });
+  await settle();
+  h.edit("subtitlePostprocessDictionary", "임시=수정");
+  h.element("cancelSubtitlePostprocess").dispatchEvent({ type: "click" });
+  assert.equal(saved.subtitlePostprocessDictionary, "플라스틱 뚜껑=플라흐타\n이름=교정");
 });

@@ -1,14 +1,15 @@
 "use strict";
 
-importScripts("subtitle-extractor.js", "subtitle-downloads.js");
+importScripts("subtitle-extractor.js", "subtitle-downloads.js", "subtitle-translation-router.js");
 
 const DEFAULT_SETTINGS = {
+  disableNewTabFavoritesRedirect: false,
   sendZeroOnYouTube: true,
   enableKoneBase64AutoDecode: true,
   floatingScrollSettings: {
     enabled: true,
-    downSpeed: 12.5,
-    fastDownSpeed: 37.5,
+    downSpeed: 7.5,
+    fastDownSpeed: 45,
     buttonSize: 72,
     opacity: 0.2,
     position: { x: 1, y: 0.5 }

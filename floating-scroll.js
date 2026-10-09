@@ -5,8 +5,8 @@ const FLOATING_SCROLL_DEFAULT_SETTINGS = {
     enabled: true,
     buttonSize: 72,
     opacity: 0.2,
-    downSpeed: 12.5,
-    fastDownSpeed: 37.5,
+    downSpeed: 7.5,
+    fastDownSpeed: 45,
     position: { x: 1, y: 0.5 }
   },
   floatingScrollDisabledSites: [
@@ -609,7 +609,7 @@ function renderContainer() {
     createButton("🔽", "아래로 자동 스크롤", () => startAutoScroll(scrollSettings.downSpeed)),
     createButton("⬆️", "페이지 최상단으로 이동", () => scrollPageTo(0)),
     createButton("⏬", "빠르게 아래로 자동 스크롤", () => startAutoScroll(scrollSettings.fastDownSpeed)),
-    createButton("⬇️", "페이지 90% 지점으로 이동", () => scrollPageTo(getMaxScrollTop() * 0.9))
+    createButton("⬇️", "페이지 95% 지점으로 이동", () => scrollPageTo(getMaxScrollTop() * 0.95))
   );
   container.addEventListener("pointerdown", beginPositionDrag);
   container.addEventListener("pointermove", movePositionDrag);

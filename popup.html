@@ -23,6 +23,11 @@
 
     <main>
       <section id="basicPanel" class="tab-panel" role="tabpanel" aria-labelledby="basicTab">
+        <label class="toggle-row" for="disableNewTabFavoritesRedirect">
+          <span>새 탭을 Favorites로 이동하지 않음</span>
+          <input id="disableNewTabFavoritesRedirect" type="checkbox">
+        </label>
+
         <button id="openScrollSettings" class="link-button" type="button">
           플로팅 자동 스크롤 버튼 설정 열기
         </button>
@@ -64,6 +69,7 @@
           <label for="subtitleFile">자막 파일</label>
           <input id="subtitleFile" type="file" accept=".srt,.vtt,.ass,.ssa,.smi,.sami,.txt">
         </div>
+        <small id="subtitleImportedFileName" hidden></small>
 
         <div class="subtitle-row">
           <label for="subtitleEncoding">인코딩</label>
@@ -76,6 +82,27 @@
             <option value="windows-1252">Latin-1 (비권장)</option>
           </select>
         </div>
+
+        <div class="subtitle-row">
+          <label for="subtitleLanguage">언어</label>
+          <select id="subtitleLanguage" aria-describedby="subtitleLanguageHint"></select>
+        </div>
+        <button id="subtitlePostprocessSettings" class="link-button" type="button" hidden>후처리 설정</button>
+        <p id="subtitleLanguageHint" class="subtitle-hint">자막의 원래 언어를 선택하면 각 줄을 한국어로 번역합니다. 첫 사용 시 영상 페이지에서 번역 모델을 준비하세요.</p>
+
+        <dialog id="subtitlePostprocessDialog" aria-labelledby="subtitlePostprocessTitle">
+          <form id="subtitlePostprocessForm">
+            <h2 id="subtitlePostprocessTitle">후처리 설정</h2>
+            <label for="subtitlePostprocessDictionary">후처리 사전</label>
+            <p class="subtitle-hint">출력=후처리 형식으로 한 줄씩 입력하세요. 번역 결과에서 일치하는 모든 문구를 바꿉니다.</p>
+            <textarea id="subtitlePostprocessDictionary" rows="10" maxlength="65536" spellcheck="false" placeholder="플라스틱 뚜껑=플라흐타"></textarea>
+            <p id="subtitlePostprocessStatus" class="subtitle-hint" aria-live="polite"></p>
+            <div class="subtitle-actions">
+              <button id="saveSubtitlePostprocess" class="primary-button" type="submit">저장</button>
+              <button id="cancelSubtitlePostprocess" type="button">취소</button>
+            </div>
+          </form>
+        </dialog>
 
         <div class="subtitle-row sync-row">
           <label for="subtitleOffset">자막 싱크</label>
@@ -289,6 +316,9 @@
 
     <script src="popup.js"></script>
     <script src="subtitle-style.js"></script>
+    <script src="subtitle-translation.js"></script>
+    <script src="subtitle-postprocess.js"></script>
+    <script src="subtitle-extractor.js"></script>
     <script src="subtitle-popup.js"></script>
     <script src="download-popup.js"></script>
   </body>

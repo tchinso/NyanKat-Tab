@@ -3,6 +3,7 @@
 Chrome MV3 extension for:
 
 - replacing the new tab page with `https://fav.ju.mp/`
+- optionally leaving new tabs on the extension's blank page with **새 탭을 Favorites로 이동하지 않음** in **기본**
 - falling back from `https://fav.ju.mp/` to `https://12tw.pages.dev/`, then to `https://tchinso.github.io/fav/` when navigation fails
 - sending a `0` key event after YouTube watch pages load
 - decoding selected Base64 text from the `NyanKatX3 Tab` right-click menu, including up to three nested Base64 layers
@@ -10,6 +11,7 @@ Chrome MV3 extension for:
 - showing floating auto-scroll buttons with configurable opacity and site exclusions
 - downloading detected soft subtitles from the popup's separate **자막추출** tab
 - applying local subtitles to videos using the existing **자막** overlay tab
+- streaming subtitle translation into Korean using the browser's on-device Translator API, with a saved literal postprocessing dictionary
 - saving every subtitle display option, including built-in/installed fonts, text spacing, gradient fills, outlines, backgrounds, and shadows
 - unlocking disabled `button` elements, closing newly opened tooltips and the Kiosk support popup, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
 - persisting the YouTube, kone.gg decoder, and floating scroll settings across browser restarts
@@ -47,6 +49,16 @@ Each fetched resource is limited to 4 MiB; gathered subtitles are limited to 24 
 Run the automated checks with `node --test`. See [site validation](tests/fixtures/subtitle-sites/README.md) for observed player mechanisms and the limits of the live-site verification.
 
 ## Subtitle display styles
+
+Version **1.3.3** adds the **언어** selector between encoding and timing. This is the subtitle's source language; the target is always Korean. **한국어(번역하지 않음)** displays the original text. Korean, English, Chinese, Japanese, and Spanish stay at the top, followed by the other major languages documented by Chrome. The selected pair is checked against the current browser at runtime.
+
+The native [Chrome Translator API](https://developer.chrome.com/docs/ai/translator-api) is supported on desktop Chrome 138+; [Microsoft Edge](https://learn.microsoft.com/en-us/microsoft-edge/web-platform/translator-api) supports it from 148+. The first language-model download needs an internet connection and a direct click on **번역 모델 준비** in the playback page. Translation runs in an extension iframe in the top frame, so it continues after the popup closes and can serve subtitles in embedded players. Each cue is translated line by line using `translateStreaming`, with completed lines cached locally. Seeks, new files, language changes, and subtitle removal cancel stale requests. A browser or site policy that blocks the API shows a preparation error and leaves the original subtitles usable.
+
+For a translated language, **후처리 설정** opens a saved dictionary. Enter one `출력=후처리` rule per line, such as `플라스틱 뚜껑=플라흐타`. All literal matches in streaming/final translated text are replaced. Longer overlapping phrases take priority, and replacement text is not replaced again in the same pass. Dictionary edits also update the currently displayed translation. Original subtitles in **한국어(번역하지 않음)** are unaffected.
+
+In **자막추출**, **번역** reads the selected subtitle into a local in-memory file, selects it under **자막 파일**, switches to **자막**, and sets **언어** to English. Choose the correct source language if needed, then press **자막 적용**. Formats unsupported by the overlay are converted to VTT with their timing preserved. **다운로드** continues to save the original subtitle separately.
+
+Floating scroll defaults are **🔽 7.5**, **⏬ 45**, and **⬇️ 95%** of the scrollable distance. Previously saved custom speeds are preserved.
 
 The **자막** tab saves all display options automatically in extension local storage, even without a selected video. The saved style is restored when reopening the popup and applies to subsequent subtitles. Existing saved font selections are migrated. File selection and subtitle timing offsets remain specific to the current subtitle/video.
 

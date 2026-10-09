@@ -2,12 +2,14 @@
 
 const DEFAULT_SETTINGS = {
   sendZeroOnYouTube: true,
-  enableKoneBase64AutoDecode: true
+  enableKoneBase64AutoDecode: true,
+  disableNewTabFavoritesRedirect: false
 };
 
 const checkboxControls = {
   sendZeroOnYouTube: document.querySelector("#sendZeroOnYouTube"),
-  enableKoneBase64AutoDecode: document.querySelector("#enableKoneBase64AutoDecode")
+  enableKoneBase64AutoDecode: document.querySelector("#enableKoneBase64AutoDecode"),
+  disableNewTabFavoritesRedirect: document.querySelector("#disableNewTabFavoritesRedirect")
 };
 
 const statusElement = document.querySelector("#status");
@@ -47,6 +49,8 @@ function showTab(tabName) {
   }));
 }
 
+window.NyanKatPopup = { showTab };
+
 function getActiveTab() {
   return new Promise((resolve) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -82,7 +86,7 @@ function enableScrollPositionMode() {
 
 chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
   for (const [key, control] of Object.entries(checkboxControls)) {
-    control.checked = settings[key] !== false;
+    control.checked = settings[key] === undefined ? DEFAULT_SETTINGS[key] : Boolean(settings[key]);
     control.addEventListener("change", () => {
       saveSetting(key, control.checked);
     });

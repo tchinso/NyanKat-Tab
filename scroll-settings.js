@@ -4,8 +4,8 @@ const DEFAULT_SCROLL_SETTINGS = {
   enabled: true,
   buttonSize: 72,
   opacity: 0.2,
-  downSpeed: 12.5,
-  fastDownSpeed: 37.5,
+  downSpeed: 7.5,
+  fastDownSpeed: 45,
   position: { x: 1, y: 0.5 }
 };
 

@@ -394,6 +394,40 @@ button:hover {
   white-space: nowrap;
 }
 
+.download-track-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.subtitle-hint {
+  color: color-mix(in srgb, CanvasText 65%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 4px 0 12px;
+}
+
+#subtitlePostprocessDialog {
+  box-sizing: border-box;
+  width: calc(100% - 24px);
+  max-height: calc(100vh - 24px);
+  border: 1px solid #8888;
+  border-radius: 10px;
+  background: Canvas;
+  color: CanvasText;
+  padding: 16px;
+}
+
+#subtitlePostprocessDialog::backdrop {
+  background: #0007;
+}
+
+#subtitlePostprocessDictionary {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  font: 13px/1.6 "Malgun Gothic", sans-serif;
+}
+
 button:disabled {
   cursor: default;
   opacity: 0.55;

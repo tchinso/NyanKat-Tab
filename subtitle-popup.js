@@ -6,12 +6,24 @@
     refreshVideos: document.querySelector("#refreshVideos"),
     file: document.querySelector("#subtitleFile"),
     encoding: document.querySelector("#subtitleEncoding"),
+    language: document.querySelector("#subtitleLanguage"),
     offset: document.querySelector("#subtitleOffset"),
     load: document.querySelector("#loadSubtitle"),
     unload: document.querySelector("#unloadSubtitle"),
     status: document.querySelector("#subtitleStatus")
   };
   const { DEFAULT_STYLE, FONT_GROUPS, normalizeStyle, fontValue, ensureFont } = window.NyanKatSubtitleStyle;
+  const translation = window.NyanKatSubtitleTranslation;
+  const languages = translation?.LANGUAGES || [{ value: "ko", label: "한국어(번역하지 않음)", pinned: true }];
+  const otherLanguages = document.createElement("optgroup");
+  otherLanguages.label = "주요 언어";
+  for (const language of languages) {
+    const option = document.createElement("option");
+    option.value = language.value;
+    option.textContent = language.label;
+    (language.pinned ? elements.language : otherLanguages).append(option);
+  }
+  if (otherLanguages.children.length) elements.language.append(otherLanguages);
   const controlIds = {
     font: "subtitleFont", fontSize: "subtitleFontSize",
     letterSpacing: "subtitleLetterSpacing", lineHeight: "subtitleLineHeight",
@@ -38,6 +50,23 @@
   let styleRevision = 0;
   let styleWrite = Promise.resolve();
   let savedStyle = { ...DEFAULT_STYLE };
+  let importedFile = null;
+  let languageTouched = false;
+  let videoRefresh = Promise.resolve();
+  let postprocessDictionary = "";
+  const postprocessButton = document.querySelector("#subtitlePostprocessSettings");
+  const postprocessDialog = document.querySelector("#subtitlePostprocessDialog");
+  const postprocessInput = document.querySelector("#subtitlePostprocessDictionary");
+  const postprocessStatus = document.querySelector("#subtitlePostprocessStatus");
+  const postprocessReady = chrome.storage.local.get("subtitlePostprocessDictionary").then(result => {
+    postprocessDictionary = typeof result.subtitlePostprocessDictionary === "string"
+      ? result.subtitlePostprocessDictionary.slice(0, 65536) : "";
+  }).catch(() => {});
+
+  function updateLanguageFields() {
+    postprocessButton.hidden = elements.language.value === "ko";
+  }
+  updateLanguageFields();
 
   function persistStyle(settings) {
     savedStyle = normalizeStyle(settings);
@@ -275,10 +304,14 @@
     }
   }
 
-  function applyState(state) {
+  function applyState(state, restoreLanguage = false) {
     // Stored style and the user's edits are authoritative; overlay replies can be stale.
     if (state) {
       elements.offset.value = String(Math.round(Number(state.offsetMs) || 0));
+      if (restoreLanguage && !languageTouched && state.sourceLanguage) {
+        elements.language.value = translation?.normalizeLanguage(state.sourceLanguage) || "ko";
+        updateLanguageFields();
+      }
     }
   }
 
@@ -305,7 +338,7 @@
     if (response && response.ok && isCurrentRequest(target, revision)) {
       const updated = await sendStyleToTarget(target, readStyle());
       if (isCurrentRequest(target, revision)) {
-        applyState(updated?.ok ? updated.state : response.state);
+        applyState(updated?.ok ? updated.state : response.state, true);
       }
     }
   }
@@ -406,7 +439,7 @@
 
   async function loadSubtitle() {
     await styleReady;
-    const file = elements.file.files && elements.file.files[0];
+    const file = elements.file.files?.[0] || importedFile;
     if (!file) {
       setStatus("자막 파일을 선택하세요.");
       return;
@@ -427,6 +460,7 @@
       b64,
       filename: file.name,
       encoding: elements.encoding.value,
+      sourceLanguage: elements.language.value,
       offsetMs: Number(elements.offset.value) || 0,
       settings: readStyle()
     });
@@ -441,7 +475,50 @@
     if (isCurrentRequest(target, revision)) {
       applyState(response.state);
     }
-    setStatus(response.count + "개의 자막 구간을 적용했습니다.");
+    setStatus(response.count + "개의 자막 구간을 적용했습니다." +
+      (elements.language.value !== "ko" ? " 각 줄을 한국어로 번역합니다. 첫 사용 시 영상 페이지의 ‘번역 모델 준비’를 누르세요." : ""));
+  }
+
+  async function updateLanguage() {
+    updateLanguageFields();
+    languageTouched = true;
+    const revision = ++uiRevision;
+    const target = getSelectedTarget();
+    if (!target) return;
+    const response = await sendToSelectedTarget("NYANKAT_SUBTITLE_SET_LANGUAGE", {
+      sourceLanguage: elements.language.value
+    });
+    if (!isCurrentRequest(target, revision)) return;
+    setStatus(response?.ok
+      ? (elements.language.value === "ko" ? "원문 자막을 표시합니다." : "각 줄을 한국어로 번역합니다. 첫 사용 시 영상 페이지에서 번역 모델을 준비하세요.")
+      : "자막 언어를 변경하지 못했습니다.");
+  }
+
+  async function importExtractedSubtitle({ text, filename, partial, file }) {
+    if (typeof text !== "string" || !text.trim()) return false;
+    importedFile = file || new File([text], filename || "subtitle.vtt", { type: "text/plain;charset=utf-8" });
+    const name = document.querySelector("#subtitleImportedFileName");
+    try {
+      const transfer = new DataTransfer();
+      transfer.items.add(importedFile);
+      elements.file.files = transfer.files;
+      name.hidden = true;
+    } catch {
+      // Keep the imported file usable even when a browser disallows assigning a FileList.
+      elements.file.value = "";
+      name.textContent = importedFile.name;
+      name.hidden = false;
+    }
+    elements.encoding.value = "utf-8";
+    elements.language.value = "en";
+    updateLanguageFields();
+    languageTouched = true;
+    uiRevision += 1;
+    window.NyanKatPopup?.showTab("subtitle");
+    await videoRefresh;
+    setStatus((partial ? "로드된 구간만 가져왔습니다. " : "자막 파일을 가져왔습니다. ") +
+      "언어를 영어로 설정했습니다. 대상 동영상을 선택한 뒤 ‘자막 적용’을 누르세요.");
+    return true;
   }
 
   async function unloadSubtitle() {
@@ -502,12 +579,44 @@
   elements.refreshVideos.addEventListener("click", refreshVideos);
   elements.videoSelect.addEventListener("change", () => {
     uiRevision += 1;
+    // A pending file keeps its chosen source language when choosing its video.
+    languageTouched = Boolean(importedFile || elements.file.files?.length);
     refreshTargetState();
   });
   elements.load.addEventListener("click", loadSubtitle);
   elements.unload.addEventListener("click", unloadSubtitle);
   elements.offset.addEventListener("input", queueOffsetUpdate);
   elements.offset.addEventListener("change", queueOffsetUpdate);
+  elements.language.addEventListener("change", () => { void updateLanguage(); });
+  elements.file.addEventListener("change", () => {
+    importedFile = null;
+    document.querySelector("#subtitleImportedFileName").hidden = true;
+  });
+  postprocessButton.addEventListener("click", async () => {
+    await postprocessReady;
+    postprocessInput.value = postprocessDictionary;
+    postprocessStatus.textContent = "";
+    postprocessDialog.showModal();
+  });
+  document.querySelector("#cancelSubtitlePostprocess").addEventListener("click", () => postprocessDialog.close());
+  document.querySelector("#subtitlePostprocessForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    const dictionary = postprocessInput.value;
+    const compiled = window.NyanKatSubtitlePostprocess.compile(dictionary);
+    if (compiled.errors?.length) {
+      const problem = compiled.errors[0];
+      postprocessStatus.textContent = (problem.line ? problem.line + "행: " : "") + problem.message;
+      return;
+    }
+    try {
+      await chrome.storage.local.set({ subtitlePostprocessDictionary: dictionary });
+      postprocessDictionary = dictionary;
+      postprocessDialog.close();
+      setStatus(compiled.count + "개의 후처리 규칙을 저장했습니다.");
+    } catch {
+      postprocessStatus.textContent = "후처리 사전을 저장하지 못했습니다. 다시 시도하세요.";
+    }
+  });
 
   for (const button of document.querySelectorAll("[data-offset-adjust]")) {
     button.addEventListener("click", async () => {
@@ -545,9 +654,9 @@
 
   document.addEventListener("nyankat-popup-tab-shown", (event) => {
     if (event.detail && event.detail.tabName === "subtitle") {
-      refreshVideos();
+      videoRefresh = refreshVideos();
     }
   });
 
-  window.NyanKatSubtitlePopup = { refreshVideos };
+  window.NyanKatSubtitlePopup = { refreshVideos, importExtractedSubtitle };
 })();

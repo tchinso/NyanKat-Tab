@@ -75,6 +75,7 @@ async function harness(options = {}) {
   document.documentElement.append(video);
   const frames = new Map();
   const fontRequests = [];
+  const translationPorts = [];
   let nextFrame = 1;
   const window = {
     innerWidth: 1600, innerHeight: 1000,
@@ -84,9 +85,16 @@ async function harness(options = {}) {
     cancelAnimationFrame(id) { frames.delete(id); },
     getComputedStyle() { return { display: "block", visibility: "visible", opacity: "1", paddingTop: "0px", paddingBottom: "0px" }; }
   };
+  window.top = options.embedded ? {} : window;
   const chrome = {
-    runtime: { onMessage: event() },
-    storage: { local: { get: async () => options.read ? options.read() : options.saved || {} }, onChanged: event() }
+    runtime: { onMessage: event(), getURL: file => "chrome-extension://test/" + file, connect() {
+      const port = { onMessage: event(), onDisconnect: event(), messages: [],
+        postMessage(message) { this.messages.push(plain(message)); },
+        disconnect() { this.disconnected = true; this.onDisconnect.emit(); } };
+      translationPorts.push(port);
+      return port;
+    } },
+    storage: { local: { get: async keys => options.read && Array.isArray(keys) ? options.read() : options.saved || {} }, onChanged: event() }
   };
   class Observer { observe() {} disconnect() {} }
   const context = vm.createContext({
@@ -99,6 +107,8 @@ async function harness(options = {}) {
   vm.runInContext(read("subtitle-style.js"), context);
   window.NyanKatSubtitleStyle.ensureFont = async (_document, font) => { fontRequests.push(font); return true; };
   vm.runInContext(read("subtitle-parser.js"), context);
+  vm.runInContext(read("subtitle-translation.js"), context);
+  vm.runInContext(read("subtitle-postprocess.js"), context);
   vm.runInContext(read("subtitle-overlay.js"), context);
   await settle();
   function message(type, payload = {}) {
@@ -107,7 +117,7 @@ async function harness(options = {}) {
     return response;
   }
   return {
-    window, document, video, chrome, message, fontRequests,
+    window, document, video, chrome, message, fontRequests, translationPorts,
     layer(name) { return document.querySelector(".nyankat-subtitle-" + name); },
     load(settings) {
       return message("NYANKAT_SUBTITLE_LOAD", {
@@ -216,4 +226,85 @@ test("a delayed storage read cannot overwrite a record already styled by the pop
   await settle();
   assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.settings.fontSize, customStyle.fontSize);
   assert.equal(h.layer("overlay").style["--nyankat-subtitle-font-size"], "63px");
+});
+
+function loadTranslated(h, sourceLanguage = "en") {
+  return h.message("NYANKAT_SUBTITLE_LOAD", {
+    sourceLanguage, filename: "english.srt", encoding: "utf-8", offsetMs: 0,
+    b64: Buffer.from("1\n00:00:01,000 --> 00:00:03,000\nPlastic lid\nsecond line\n\n2\n00:00:05,000 --> 00:00:07,000\nNext cue").toString("base64")
+  });
+}
+
+test("streaming translation applies the saved dictionary to all text layers and updates rules live", async () => {
+  const h = await harness({ saved: { subtitlePostprocessDictionary: "플라스틱 뚜껑=플라흐타" } });
+  assert.equal(loadTranslated(h).ok, true);
+  const port = h.translationPorts[0];
+  const request = port.messages.find(message => message.type === "translate");
+  assert.equal(request.sourceLanguage, "en");
+  assert.equal(request.text, "Plastic lid\nsecond line");
+  assert.equal(h.layer("fill").textContent, "Plastic lid\nsecond line", "retain source while model prepares");
+  port.onMessage.emit({ type: "update", requestId: request.requestId, text: "플라스틱 뚜껑과 플라스틱 뚜껑" });
+  assert.equal(h.layer("fill").textContent, "플라흐타과 플라흐타");
+  assert.equal(h.layer("outline").textContent, h.layer("fill").textContent);
+  port.onMessage.emit({ type: "done", requestId: request.requestId, text: "플라스틱 뚜껑" });
+  h.chrome.storage.onChanged.emit({ subtitlePostprocessDictionary: { newValue: "플라스틱 뚜껑=새 이름" } }, "local");
+  assert.equal(h.layer("fill").textContent, "새 이름", "reprocess raw result rather than old replacement");
+  h.message("NYANKAT_SUBTITLE_SET_LANGUAGE", { sourceLanguage: "ko" });
+  assert.equal(h.layer("fill").textContent, "Plastic lid\nsecond line");
+  assert.equal(port.disconnected, true);
+});
+
+test("seeks, language changes and unloading reject stale streaming replies", async () => {
+  const h = await harness();
+  loadTranslated(h);
+  const firstPort = h.translationPorts[0];
+  const first = firstPort.messages.find(message => message.type === "translate");
+  h.video.currentTime = 5.5;
+  h.video.emit("timeupdate");
+  const second = firstPort.messages.filter(message => message.type === "translate").at(-1);
+  assert.notEqual(second.requestId, first.requestId);
+  assert.ok(firstPort.messages.some(message => message.type === "cancel" && message.requestId === first.requestId));
+  firstPort.onMessage.emit({ type: "update", requestId: first.requestId, text: "오래된 자막" });
+  assert.equal(h.layer("fill").textContent, "Next cue");
+  firstPort.onMessage.emit({ type: "update", requestId: second.requestId, text: "다음 자막" });
+  assert.equal(h.layer("fill").textContent, "다음 자막");
+  h.message("NYANKAT_SUBTITLE_SET_LANGUAGE", { sourceLanguage: "ja" });
+  firstPort.onMessage.emit({ type: "done", requestId: second.requestId, text: "오래된 영어" });
+  assert.equal(h.layer("fill").textContent, "Next cue");
+  const secondPort = h.translationPorts.at(-1);
+  h.message("NYANKAT_SUBTITLE_UNLOAD");
+  assert.equal(secondPort.disconnected, true);
+  assert.equal(h.layer("fill"), null);
+});
+
+test("translation host is created in the top frame and is removed for a new session", async () => {
+  const h = await harness();
+  assert.equal(h.message("NYANKAT_SUBTITLE_TRANSLATION_HOST_ENSURE").ok, true);
+  const first = h.document.querySelector("iframe");
+  assert.equal(first.getAttribute("allow"), "translator");
+  assert.equal(first.src, "chrome-extension://test/subtitle-translation-host.html");
+  assert.equal(first.hidden, true);
+  h.message("NYANKAT_SUBTITLE_TRANSLATION_HOST_VISIBILITY", {});
+  h.message("NYANKAT_SUBTITLE_TRANSLATION_HOST_ENSURE");
+  assert.equal(h.document.querySelectorAll("iframe").length, 1);
+  h.message("NYANKAT_SUBTITLE_TRANSLATION_HOST_REMOVE");
+  assert.equal(h.document.querySelector("iframe"), null);
+  h.message("NYANKAT_SUBTITLE_TRANSLATION_HOST_ENSURE");
+  assert.notEqual(h.document.querySelector("iframe"), first);
+  const embedded = await harness({ embedded: true });
+  assert.equal(embedded.message("NYANKAT_SUBTITLE_TRANSLATION_HOST_ENSURE").ok, false);
+});
+
+test("moving an active translated cue into a timing gap clears text and cancels the old stream", async () => {
+  const h = await harness();
+  loadTranslated(h);
+  const port = h.translationPorts[0];
+  const request = port.messages.find(message => message.type === "translate");
+  port.onMessage.emit({ type: "update", requestId: request.requestId, text: "현재 번역" });
+  h.message("NYANKAT_SUBTITLE_SET_OFFSET", { offsetMs: 10000 });
+  assert.equal(h.layer("fill").textContent, "");
+  assert.equal(h.layer("text").hidden, true);
+  assert.ok(port.messages.some(message => message.type === "cancel" && message.requestId === request.requestId));
+  port.onMessage.emit({ type: "done", requestId: request.requestId, text: "취소된 번역" });
+  assert.equal(h.layer("fill").textContent, "");
 });

@@ -43,6 +43,50 @@
     button.disabled = false;
   }
 
+  async function translate(track, button) {
+    if (busy) return;
+    busy = true;
+    button.disabled = true;
+    status.textContent = "번역할 자막을 읽는 중… 스트리밍 자막은 모든 구간을 모은 뒤 불러옵니다.";
+    try {
+      const response = await request("NYANKAT_DOWNLOAD_PREPARE", { id: track.id });
+      if (!response?.ok) {
+        status.textContent = reasons[response?.reason] || "자막을 읽지 못했습니다. 사이트 자막을 다시 켜고 재검색해 보세요.";
+        return;
+      }
+      if (typeof response.text !== "string" || typeof window.NyanKatSubtitlePopup?.importExtractedSubtitle !== "function") {
+        throw new Error("import_failed");
+      }
+      let text = response.text;
+      let format = String(response.format || track.format || "vtt").toLowerCase();
+      let filename = response.filename || "subtitle." + format;
+      if (!["srt", "vtt", "ass", "ssa", "smi", "sami"].includes(format)) {
+        const extractor = window.NyanKatSubtitleExtractor;
+        if (!extractor) throw new Error("import_failed");
+        const cues = extractor.parseCues(text, format);
+        if (!cues.length) throw new Error("no_cues");
+        text = extractor.cuesToVtt(cues);
+        format = "vtt";
+        filename = filename.replace(/\.[^.]+$/, "") + ".vtt";
+      }
+      const file = new File([text], filename, {
+        type: (format === "vtt" ? "text/vtt" : "text/plain") + ";charset=utf-8"
+      });
+      const imported = await window.NyanKatSubtitlePopup.importExtractedSubtitle({
+        text, format, filename, partial: response.partial === true, file
+      });
+      if (imported === false || imported?.ok === false) throw new Error(imported?.reason || "import_failed");
+      status.textContent = response.partial
+        ? "현재 플레이어에 로드된 자막 구간을 불러왔습니다. 전체 자막과 다를 수 있습니다."
+        : "자막 파일을 불러왔습니다. 자막 탭에서 영어 → 한국어 번역을 사용할 수 있습니다.";
+    } catch (error) {
+      status.textContent = reasons[error?.message] || "추출한 자막을 자막 파일로 불러오지 못했습니다. 다시 시도해 보세요.";
+    } finally {
+      busy = false;
+      button.disabled = false;
+    }
+  }
+
   function render(tracks) {
     // The same URL is often reported both by the network observer and its frame.
     const unique = new Map();
@@ -77,8 +121,16 @@
       button.textContent = "다운로드";
       button.setAttribute("aria-label", label.textContent + " 다운로드");
       button.addEventListener("click", () => { void download(track, button); });
+      const translateButton = document.createElement("button");
+      translateButton.type = "button";
+      translateButton.textContent = "번역";
+      translateButton.setAttribute("aria-label", label.textContent + " 번역");
+      translateButton.addEventListener("click", () => { void translate(track, translateButton); });
+      const actions = document.createElement("div");
+      actions.className = "download-track-actions";
+      actions.append(translateButton, button);
       info.append(label, detail);
-      row.append(info, button);
+      row.append(info, actions);
       list.append(row);
     }
   }
