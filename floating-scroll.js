@@ -41,6 +41,7 @@ let lastScrollableElement = null;
 let lastFrameTime = 0;
 let isPositionEditing = false;
 let dragState = null;
+let fullscreenVisibilityFrame = 0;
 
 function normalizeHost(value) {
   return NyanKatScrollSites.normalizeSite(value);
@@ -582,13 +583,33 @@ function syncFullscreenVisibility() {
     return;
   }
 
-  const isFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  const isYouTubeFullscreen = location.hostname === "www.youtube.com" && Boolean(
+    document.querySelector("ytd-watch-flexy[fullscreen], .html5-video-player.ytp-fullscreen")
+  );
+  const isNativeVideoFullscreen = Array.from(document.querySelectorAll("video")).some(
+    (video) => video.webkitDisplayingFullscreen
+  );
+  const isFullscreen = Boolean(
+    document.fullscreenElement || document.webkitFullscreenElement ||
+    isYouTubeFullscreen || isNativeVideoFullscreen
+  );
   container.style.display = isFullscreen ? "none" : "grid";
   if (isFullscreen) {
     stopAutoScroll();
   } else {
     positionContainer();
   }
+}
+
+function scheduleFullscreenVisibility() {
+  if (fullscreenVisibilityFrame) {
+    return;
+  }
+
+  fullscreenVisibilityFrame = window.requestAnimationFrame(() => {
+    fullscreenVisibilityFrame = 0;
+    syncFullscreenVisibility();
+  });
 }
 
 function renderContainer() {
@@ -698,6 +719,32 @@ window.addEventListener("blur", stopAutoScroll, true);
 window.addEventListener("resize", positionContainer);
 document.addEventListener("fullscreenchange", syncFullscreenVisibility);
 document.addEventListener("webkitfullscreenchange", syncFullscreenVisibility);
+document.addEventListener("webkitbeginfullscreen", syncFullscreenVisibility, true);
+document.addEventListener("webkitendfullscreen", syncFullscreenVisibility, true);
+if (location.hostname === "www.youtube.com") {
+  const youtubeFullscreenObserver = new MutationObserver((mutations) => {
+    if (mutations.some((mutation) =>
+      mutation.type === "attributes" &&
+      (mutation.target.matches("ytd-watch-flexy") ||
+        mutation.target.matches(".html5-video-player"))
+    )) {
+      scheduleFullscreenVisibility();
+    }
+  });
+  const observeYouTubeFullscreen = () => {
+    youtubeFullscreenObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "fullscreen"],
+      subtree: true
+    });
+    syncFullscreenVisibility();
+  };
+  if (document.documentElement) {
+    observeYouTubeFullscreen();
+  } else {
+    document.addEventListener("DOMContentLoaded", observeYouTubeFullscreen, { once: true });
+  }
+}
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     stopAutoScroll();
