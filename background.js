@@ -45,6 +45,7 @@ const PAGE_CONTEXTS = ["page", "frame", "link", "image", "video", "audio"];
 const KIO_DOWNLOAD_STATS_MESSAGE_TYPE = "nyankat-kio-download-stats";
 const KIO_DOWNLOAD_GET_STATS_MESSAGE_TYPE = "nyankat-kio-download-get-stats";
 const KIO_DOWNLOAD_STATS_UPDATED_MESSAGE_TYPE = "nyankat-kio-download-stats-updated";
+const KIO_DOWNLOAD_SCAN_NOW_MESSAGE_TYPE = "nyankat-kio-download-scan-now";
 const KIO_DOWNLOAD_PORT_NAME = "nyankat-kio-download-page";
 const KIO_DOWNLOAD_STORAGE_KEY = "nyankatKioDownloadStats";
 const KIO_DOWNLOAD_MAX_MATCHES = 80;
@@ -58,6 +59,15 @@ const FALLBACK_BY_HOST = {
 
 let kioDownloadStats = {};
 const kioDownloadPorts = new Set();
+const kioDownloadScanRequests = new Map();
+let kioDownloadStatsRestored = false;
+let kioDownloadRestorePending = false;
+const kioDownloadRestoreCallbacks = [];
+let kioDownloadRevision = Date.now();
+
+function bumpKioDownloadRevision() {
+  kioDownloadRevision = Math.max(Date.now(), kioDownloadRevision + 1);
+}
 
 function ensureDefaultSettings() {
   chrome.storage.sync.remove(OBSOLETE_SETTINGS);
@@ -277,6 +287,7 @@ function pruneKioDownloadStats() {
   for (const [key, entry] of Object.entries(kioDownloadStats)) {
     if (!entry || entry.updatedAt < cutoff) {
       delete kioDownloadStats[key];
+      kioDownloadScanRequests.delete(key);
       changed = true;
     }
   }
@@ -285,7 +296,10 @@ function pruneKioDownloadStats() {
 }
 
 function getKioDownloadEntries() {
-  pruneKioDownloadStats();
+  if (pruneKioDownloadStats()) {
+    bumpKioDownloadRevision();
+    persistKioDownloadStats();
+  }
   return Object.values(kioDownloadStats).sort((first, second) => second.updatedAt - first.updatedAt);
 }
 
@@ -298,32 +312,55 @@ function persistKioDownloadStats() {
 }
 
 function restoreKioDownloadStats(callback) {
-  if (!chrome.storage || !chrome.storage.session) {
+  if (kioDownloadStatsRestored) {
     callback();
     return;
   }
 
-  chrome.storage.session.get(KIO_DOWNLOAD_STORAGE_KEY, (result) => {
+  kioDownloadRestoreCallbacks.push(callback);
+  if (kioDownloadRestorePending) {
+    return;
+  }
+  kioDownloadRestorePending = true;
+
+  const finish = (result) => {
     const storedStats = result && result[KIO_DOWNLOAD_STORAGE_KEY];
     if (storedStats && typeof storedStats === "object") {
-      kioDownloadStats = storedStats;
-      if (pruneKioDownloadStats()) {
-        persistKioDownloadStats();
-      }
+      kioDownloadStats = { ...storedStats, ...kioDownloadStats };
+    }
+    kioDownloadStatsRestored = true;
+    kioDownloadRestorePending = false;
+    if (pruneKioDownloadStats()) {
+      bumpKioDownloadRevision();
+      persistKioDownloadStats();
     }
 
-    callback();
-  });
+    for (const waitingCallback of kioDownloadRestoreCallbacks.splice(0)) {
+      waitingCallback();
+    }
+  };
+
+  if (!chrome.storage || !chrome.storage.session) {
+    finish(null);
+  } else {
+    chrome.storage.session.get(KIO_DOWNLOAD_STORAGE_KEY, finish);
+  }
 }
 
 function broadcastKioDownloadStats() {
+  const entries = getKioDownloadEntries();
   const message = {
     type: KIO_DOWNLOAD_STATS_UPDATED_MESSAGE_TYPE,
-    entries: getKioDownloadEntries()
+    revision: kioDownloadRevision,
+    entries
   };
 
   for (const port of kioDownloadPorts) {
-    port.postMessage(message);
+    try {
+      port.postMessage(message);
+    } catch {
+      kioDownloadPorts.delete(port);
+    }
   }
 }
 
@@ -350,6 +387,20 @@ function handleKioDownloadStats(message, sender) {
   };
 
   pruneKioDownloadStats();
+  bumpKioDownloadRevision();
+  persistKioDownloadStats();
+  broadcastKioDownloadStats();
+}
+
+function removeKioDownloadStatsForFrame(tabId, frameId) {
+  const key = tabId + ":" + frameId;
+  kioDownloadScanRequests.delete(key);
+  if (!Object.hasOwn(kioDownloadStats, key)) {
+    return;
+  }
+
+  delete kioDownloadStats[key];
+  bumpKioDownloadRevision();
   persistKioDownloadStats();
   broadcastKioDownloadStats();
 }
@@ -361,13 +412,30 @@ function removeKioDownloadStatsForTab(tabId) {
   for (const key of Object.keys(kioDownloadStats)) {
     if (key.startsWith(prefix)) {
       delete kioDownloadStats[key];
+      kioDownloadScanRequests.delete(key);
       changed = true;
     }
   }
 
   if (changed) {
+    bumpKioDownloadRevision();
     persistKioDownloadStats();
     broadcastKioDownloadStats();
+  }
+}
+
+function requestKioDownloadScans() {
+  const now = Date.now();
+  for (const [key, entry] of Object.entries(kioDownloadStats)) {
+    if (now - (kioDownloadScanRequests.get(key) || 0) < 1700) {
+      continue;
+    }
+    kioDownloadScanRequests.set(key, now);
+    chrome.tabs.sendMessage(entry.tabId, { type: KIO_DOWNLOAD_SCAN_NOW_MESSAGE_TYPE }, { frameId: entry.frameId }, (response) => {
+      if ((chrome.runtime.lastError || !response || !response.ok) && kioDownloadStats[key] === entry) {
+        removeKioDownloadStatsForFrame(entry.tabId, entry.frameId);
+      }
+    });
   }
 }
 
@@ -432,14 +500,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === KIO_DOWNLOAD_STATS_MESSAGE_TYPE) {
-    handleKioDownloadStats(message, sender);
-    sendResponse({ ok: true });
-    return;
+    restoreKioDownloadStats(() => {
+      handleKioDownloadStats(message, sender);
+      sendResponse({ ok: true });
+    });
+    return true;
   }
 
   if (message.type === KIO_DOWNLOAD_GET_STATS_MESSAGE_TYPE) {
     restoreKioDownloadStats(() => {
-      sendResponse({ ok: true, entries: getKioDownloadEntries() });
+      requestKioDownloadScans();
+      const entries = getKioDownloadEntries();
+      sendResponse({ ok: true, revision: kioDownloadRevision, entries });
     });
     return true;
   }
@@ -452,10 +524,18 @@ chrome.runtime.onConnect.addListener((port) => {
 
   kioDownloadPorts.add(port);
   restoreKioDownloadStats(() => {
-    port.postMessage({
-      type: KIO_DOWNLOAD_STATS_UPDATED_MESSAGE_TYPE,
-      entries: getKioDownloadEntries()
-    });
+    if (kioDownloadPorts.has(port)) {
+      const entries = getKioDownloadEntries();
+      try {
+        port.postMessage({
+          type: KIO_DOWNLOAD_STATS_UPDATED_MESSAGE_TYPE,
+          revision: kioDownloadRevision,
+          entries
+        });
+      } catch {
+        kioDownloadPorts.delete(port);
+      }
+    }
   });
   port.onDisconnect.addListener(() => {
     kioDownloadPorts.delete(port);
@@ -511,4 +591,20 @@ chrome.webNavigation.onErrorOccurred.addListener(
   }
 );
 
-chrome.tabs.onRemoved.addListener(removeKioDownloadStatsForTab);
+chrome.tabs.onRemoved.addListener((tabId) => {
+  restoreKioDownloadStats(() => removeKioDownloadStatsForTab(tabId));
+});
+
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.tabId < 0 || details.frameId < 0) {
+    return;
+  }
+
+  restoreKioDownloadStats(() => {
+    if (details.frameId === 0) {
+      removeKioDownloadStatsForTab(details.tabId);
+    } else {
+      removeKioDownloadStatsForFrame(details.tabId, details.frameId);
+    }
+  });
+});

@@ -6,9 +6,108 @@ const KIO_DOWNLOAD_PORT_NAME = "nyankat-kio-download-page";
 
 const summaryElement = document.querySelector("#summary");
 const refreshButton = document.querySelector("#refresh");
+const enableSoundButton = document.querySelector("#enableSound");
 const emptyState = document.querySelector("#emptyState");
 const entryList = document.querySelector("#entryList");
 const entryTemplate = document.querySelector("#entryTemplate");
+const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+
+let audioContext = null;
+let latestRevision = -Infinity;
+let previousMatchCount = null;
+let completionSoundTimer = 0;
+
+if (!AudioContextConstructor) {
+  enableSoundButton.disabled = true;
+  enableSoundButton.textContent = "완료음 지원 안 됨";
+}
+
+function getAudioContext() {
+  if (!AudioContextConstructor) {
+    return null;
+  }
+
+  if (!audioContext) {
+    audioContext = new AudioContextConstructor();
+  }
+  return audioContext;
+}
+
+function playCompletionChime(context) {
+  const start = context.currentTime + 0.02;
+  const notes = [
+    [523.25, 0, 0.8, 0.055],
+    [659.25, 0.26, 0.8, 0.055],
+    [783.99, 0.52, 0.85, 0.06],
+    [1046.5, 0.88, 1.12, 0.07]
+  ];
+
+  for (const [frequency, offset, duration, volume] of notes) {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const noteStart = start + offset;
+    oscillator.type = "triangle";
+    oscillator.frequency.setValueAtTime(frequency, noteStart);
+    gain.gain.setValueAtTime(0.0001, noteStart);
+    gain.gain.linearRampToValueAtTime(volume, noteStart + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + duration);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(noteStart);
+    oscillator.stop(noteStart + duration);
+  }
+}
+
+function playCompletionSound() {
+  let context;
+  try {
+    context = getAudioContext();
+  } catch {
+    enableSoundButton.textContent = "완료음 사용 불가";
+    return;
+  }
+  if (!context) {
+    return;
+  }
+
+  if (context.state === "running") {
+    enableSoundButton.textContent = "완료음 켜짐";
+    playCompletionChime(context);
+    return;
+  }
+
+  enableSoundButton.textContent = "완료음 허용 필요";
+  const detectedAt = Date.now();
+  context.resume().then(() => {
+    if (context.state === "running") {
+      enableSoundButton.textContent = "완료음 켜짐";
+      if (Date.now() - detectedAt < 2000) {
+        playCompletionChime(context);
+      }
+    }
+  }).catch(() => {
+    enableSoundButton.textContent = "완료음 허용 필요";
+  });
+}
+
+enableSoundButton.addEventListener("click", () => {
+  let context;
+  try {
+    context = getAudioContext();
+  } catch {
+    enableSoundButton.textContent = "완료음 사용 불가";
+    return;
+  }
+  if (!context) {
+    return;
+  }
+
+  context.resume().then(() => {
+    enableSoundButton.textContent = context.state === "running" ? "완료음 켜짐" : "완료음 켜기";
+  }).catch(() => {
+    enableSoundButton.textContent = "완료음 켜기";
+  });
+});
 
 const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
   hour: "2-digit",
@@ -75,12 +174,34 @@ function createMatchElement(match) {
   return item;
 }
 
-function renderEntries(entries) {
+function renderEntries(entries, revision) {
+  if (typeof revision === "number" && revision < latestRevision) {
+    return;
+  }
+  if (typeof revision === "number") {
+    latestRevision = revision;
+  }
+
   const normalizedEntries = Array.isArray(entries) ? entries : [];
   const totalMatches = normalizedEntries.reduce((sum, entry) => sum + (entry.matches || []).length, 0);
 
+  if (totalMatches > 0 && completionSoundTimer) {
+    window.clearTimeout(completionSoundTimer);
+    completionSoundTimer = 0;
+  }
+  if (previousMatchCount !== null && previousMatchCount > 0 && totalMatches === 0) {
+    completionSoundTimer = window.setTimeout(() => {
+      completionSoundTimer = 0;
+      if (previousMatchCount === 0) {
+        playCompletionSound();
+      }
+    }, 1000);
+  }
+  previousMatchCount = totalMatches;
+
   entryList.textContent = "";
-  emptyState.hidden = normalizedEntries.length > 0;
+  emptyState.hidden = totalMatches > 0;
+  entryList.hidden = totalMatches === 0;
   summaryElement.textContent = normalizedEntries.length + "개 프레임 · B/s) " + totalMatches + "건";
 
   for (const entry of normalizedEntries) {
@@ -127,7 +248,7 @@ function requestEntries() {
       return;
     }
 
-    renderEntries(response.entries);
+    renderEntries(response.entries, response.revision);
   });
 }
 
@@ -140,7 +261,7 @@ port.onMessage.addListener((message) => {
     return;
   }
 
-  renderEntries(message.entries);
+  renderEntries(message.entries, message.revision);
 });
 
 requestEntries();

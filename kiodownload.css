@@ -14,7 +14,7 @@ header {
   border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
   display: grid;
   gap: 14px;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   padding: 18px 20px;
 }
 
@@ -77,6 +77,10 @@ button {
 .entry-list {
   display: grid;
   gap: 12px;
+}
+
+.entry-list[hidden] {
+  display: none;
 }
 
 .entry {

@@ -2,6 +2,7 @@
 
 (() => {
   const KIO_DOWNLOAD_STATS_MESSAGE_TYPE = "nyankat-kio-download-stats";
+  const KIO_DOWNLOAD_SCAN_NOW_MESSAGE_TYPE = "nyankat-kio-download-scan-now";
   const TARGET_TEXT = "B/s)";
   const SCAN_DEBOUNCE_MS = 120;
   const MAX_MATCHES = 80;
@@ -300,7 +301,7 @@
     );
   }
 
-  function scanAndReport() {
+  function scanAndReport(force = false) {
     unlockDisabledButtons(document);
     observeShadowRoots(document);
     dismissKioskHelpTooltips();
@@ -315,7 +316,7 @@
       "\n" +
       matches.map((match) => match.id + ":" + match.text).join("\n");
 
-    if (signature !== lastSignature) {
+    if (force || signature !== lastSignature) {
       lastSignature = signature;
       sendStats(matches);
     }
@@ -407,11 +408,13 @@
       }, delay);
     }
 
-    window.setInterval(() => {
-      unlockDisabledButtons(document);
-      observeShadowRoots(document);
-      scheduleScan(0);
-    }, 2000);
+    window.setInterval(() => scanAndReport(true), 2000);
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message && message.type === KIO_DOWNLOAD_SCAN_NOW_MESSAGE_TYPE) {
+        scanAndReport(true);
+        sendResponse({ ok: true });
+      }
+    });
   }
 
   start();

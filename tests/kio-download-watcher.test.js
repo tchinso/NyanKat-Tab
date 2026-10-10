@@ -91,6 +91,10 @@ class Element {
   querySelector(selector) {
     return this.querySelectorAll(selector)[0] ?? null;
   }
+
+  closest() {
+    return null;
+  }
 }
 
 class Button extends Element {
@@ -113,6 +117,11 @@ function loadWatcher() {
   document.title = "Kiosk";
   document.documentElement = new Element("html");
   document.append(document.documentElement);
+  document.createTreeWalker = () => ({ nextNode: () => null });
+
+  const reports = [];
+  const intervals = [];
+  let onMessage;
 
   let observer;
   class MutationObserverMock {
@@ -131,20 +140,32 @@ function loadWatcher() {
   const window = {
     setTimeout: () => 1,
     clearTimeout: () => {},
-    setInterval: () => 1
+    setInterval: (callback, delay) => {
+      intervals.push({ callback, delay });
+      return intervals.length;
+    }
   };
   vm.runInNewContext(watcherSource, {
     document,
     window,
     location: { hostname: "kio.ac", href: "https://kio.ac/c/example" },
     Node: { ELEMENT_NODE: 1 },
+    NodeFilter: { SHOW_TEXT: 4 },
     HTMLButtonElement: Button,
     ShadowRoot: class {},
     MutationObserver: MutationObserverMock,
     FocusEvent: class {},
-    chrome: { runtime: { sendMessage() {}, lastError: null } }
+    chrome: { runtime: {
+      sendMessage(message, callback) { reports.push(message); callback?.(); },
+      onMessage: { addListener(listener) { onMessage = listener; } },
+      lastError: null
+    } }
   });
-  return { document, observer };
+  return { document, observer, reports, intervals, sendMessage(message) {
+    let response;
+    onMessage(message, {}, value => { response = value; });
+    return response;
+  } };
 }
 
 function makeTooltip(title) {
@@ -198,4 +219,18 @@ test("closes the same Kiosk tooltip again after it closes and reopens", () => {
   ]);
 
   assert.equal(kiosk.closeButton.clickCount, 2);
+});
+
+test("two-second heartbeat reports a fresh scan even when a mutation debounce is pending", () => {
+  const { observer, intervals, reports, sendMessage } = loadWatcher();
+  assert.equal(intervals.length, 1);
+  assert.equal(intervals[0].delay, 2000);
+
+  observer.emit([{ type: "childList", addedNodes: [] }]);
+  intervals[0].callback();
+  intervals[0].callback();
+  assert.equal(reports.length, 2, "unchanged results still refresh the scan timestamp");
+
+  assert.equal(sendMessage({ type: "nyankat-kio-download-scan-now" }).ok, true);
+  assert.equal(reports.length, 3, "status-page requests can scan a throttled source tab");
 });

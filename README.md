@@ -16,6 +16,8 @@ Chrome MV3 extension for:
 - unlocking disabled `button` elements, closing newly opened tooltips and the Kiosk support popup, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
 - persisting the YouTube, kone.gg decoder, and floating scroll settings across browser restarts
 
+Version **1.3.4** refreshes kio.ac download detection every two seconds and lets each open download-status page request a fresh scan. When the detected `B/s)` count falls from a positive value to zero and stays there for one second, each open status page plays an approximately two-second chime generated with Web Audio. If the browser blocks automatic sound, click **완료음 켜기** on each status page to enable it.
+
 ## Permissions
 
 - `contextMenus`: adds the `NyanKatX3 Tab > Base64 디코딩` menu for selected page text.
