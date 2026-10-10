@@ -41,12 +41,7 @@ let saveTimer = 0;
 let statusTimer = 0;
 
 function normalizeHost(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/.*$/, "")
-    .replace(/^\*\./, "")
-    .toLowerCase();
+  return NyanKatScrollSites.normalizeSite(value);
 }
 
 function clampNumber(value, min, max, fallback) {

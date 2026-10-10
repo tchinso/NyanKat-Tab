@@ -43,12 +43,7 @@ let isPositionEditing = false;
 let dragState = null;
 
 function normalizeHost(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/.*$/, "")
-    .replace(/^\*\./, "")
-    .toLowerCase();
+  return NyanKatScrollSites.normalizeSite(value);
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -104,7 +99,7 @@ function normalizeDisabledSites(values) {
 }
 
 function matchesHost(currentHost, host) {
-  return currentHost === host || currentHost.endsWith("." + host);
+  return NyanKatScrollSites.matchesSite(currentHost, host);
 }
 
 function getScrollElement() {
@@ -582,6 +577,20 @@ function removeContainer() {
   }
 }
 
+function syncFullscreenVisibility() {
+  if (!container) {
+    return;
+  }
+
+  const isFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  container.style.display = isFullscreen ? "none" : "grid";
+  if (isFullscreen) {
+    stopAutoScroll();
+  } else {
+    positionContainer();
+  }
+}
+
 function renderContainer() {
   if (!scrollSettings || !document.documentElement) {
     removeContainer();
@@ -619,10 +628,11 @@ function renderContainer() {
   document.documentElement.append(container);
   positionContainer();
   setPositionEditing(wasPositionEditing);
+  syncFullscreenVisibility();
 }
 
 function applySettings(settings) {
-  const currentHost = location.hostname.toLowerCase();
+  const currentHost = location.href;
   const disabledSites = normalizeDisabledSites(settings.floatingScrollDisabledSites);
   if (disabledSites.some((host) => matchesHost(currentHost, host))) {
     scrollSettings = null;
@@ -640,6 +650,10 @@ function applySettings(settings) {
 }
 
 function init() {
+  refreshForPageUrl();
+}
+
+function refreshForPageUrl() {
   chrome.storage.sync.get(FLOATING_SCROLL_DEFAULT_SETTINGS, applySettings);
 }
 
@@ -651,8 +665,13 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     return;
   }
 
-  chrome.storage.sync.get(FLOATING_SCROLL_DEFAULT_SETTINGS, applySettings);
+  refreshForPageUrl();
 });
+
+// YouTube changes between watch, Shorts, channel, and general pages without
+// reloading the document. Recheck the current route when its navigation ends.
+document.addEventListener("yt-navigate-finish", refreshForPageUrl);
+window.addEventListener("popstate", refreshForPageUrl);
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== "NYANKAT_FLOATING_SCROLL_SET_POSITION_MODE") {
@@ -677,6 +696,8 @@ window.addEventListener("wheel", rememberScrollableElement, { capture: true, pas
 window.addEventListener("keydown", stopAutoScroll, true);
 window.addEventListener("blur", stopAutoScroll, true);
 window.addEventListener("resize", positionContainer);
+document.addEventListener("fullscreenchange", syncFullscreenVisibility);
+document.addEventListener("webkitfullscreenchange", syncFullscreenVisibility);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     stopAutoScroll();

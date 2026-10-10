@@ -1,6 +1,6 @@
 "use strict";
 
-importScripts("subtitle-extractor.js", "subtitle-downloads.js", "subtitle-translation-router.js");
+importScripts("floating-scroll-sites.js", "subtitle-extractor.js", "subtitle-downloads.js", "subtitle-translation-router.js");
 
 const DEFAULT_SETTINGS = {
   disableNewTabFavoritesRedirect: false,
@@ -113,17 +113,12 @@ function recreateContextMenus() {
 }
 
 function normalizeHost(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/.*$/, "")
-    .replace(/^\*\./, "")
-    .toLowerCase();
+  return NyanKatScrollSites.normalizeSite(value);
 }
 
 function getHostFromUrl(url) {
   try {
-    return normalizeHost(new URL(url).hostname);
+    return normalizeHost(new URL(url).href);
   } catch {
     return "";
   }

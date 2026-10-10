@@ -150,6 +150,12 @@ select {
   text-align: left;
 }
 
+.external-subtitle-search {
+  box-sizing: border-box;
+  display: block;
+  text-decoration: none;
+}
+
 footer {
   border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
   min-height: 18px;
