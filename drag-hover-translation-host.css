@@ -1,0 +1,28 @@
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+html, body { width: 100%; margin: 0; padding: 0; background: transparent; }
+body { padding: 5px; font: 13px/1.48 "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif; color: #edf5ff; }
+.tooltip {
+  width: 100%;
+  max-height: 340px;
+  overflow: auto;
+  background: #172238;
+  border: 1px solid #4f6784;
+  border-radius: 11px;
+  box-shadow: 0 7px 24px rgb(0 0 0 / 35%);
+  padding: 9px 12px 11px;
+}
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 5px; }
+strong { font-size: 12px; letter-spacing: .02em; color: #98c7ff; }
+#close {
+  appearance: none; border: 0; background: transparent; color: #c6d7e8;
+  font-size: 19px; line-height: 1; padding: 0 2px; cursor: pointer;
+}
+#close:hover, #close:focus-visible { color: white; }
+#result { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+#prepare {
+  display: block; margin-top: 10px; padding: 6px 10px; border: 1px solid #76b9ff;
+  border-radius: 6px; background: #2362a0; color: white; font: inherit; cursor: pointer;
+}
+#prepare[hidden] { display: none; }
+#prepare:disabled { opacity: .65; cursor: default; }

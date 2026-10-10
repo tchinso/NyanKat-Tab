@@ -16,6 +16,8 @@ const statusElement = document.querySelector("#status");
 const openScrollSettingsButton = document.querySelector("#openScrollSettings");
 const openScrollPositionModeButton = document.querySelector("#openScrollPositionMode");
 const openKioDownloadButton = document.querySelector("#openKioDownload");
+const openLinkPreviewSettingsButton = document.querySelector("#openLinkPreviewSettings");
+const openDragHoverTranslationSettingsButton = document.querySelector("#openDragHoverTranslationSettings");
 const tabButtons = Array.from(document.querySelectorAll("[role='tab']"));
 const tabPanels = Array.from(document.querySelectorAll("[role='tabpanel']"));
 let statusTimer = 0;
@@ -118,4 +120,26 @@ openScrollPositionModeButton.addEventListener("click", enableScrollPositionMode)
 
 openKioDownloadButton.addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("kiodownload.html") });
+});
+
+openLinkPreviewSettingsButton.addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("link-preview-settings.html") });
+});
+
+openDragHoverTranslationSettingsButton.addEventListener("click", () => {
+  getActiveTab().then((tab) => {
+    if (!tab || typeof tab.id !== "number") {
+      setStatus("현재 탭을 찾지 못했습니다");
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, {
+      type: "NYANKAT_DRAG_HOVER_TRANSLATION_OPEN_SETTINGS"
+    }, { frameId: 0 }, (response) => {
+      if (chrome.runtime.lastError || !response?.ok) {
+        setStatus("이 페이지에서는 번역 설정을 열 수 없습니다");
+        return;
+      }
+      window.close();
+    });
+  });
 });

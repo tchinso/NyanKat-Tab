@@ -1,6 +1,6 @@
 "use strict";
 
-importScripts("floating-scroll-sites.js", "subtitle-extractor.js", "subtitle-downloads.js", "subtitle-translation-router.js");
+importScripts("floating-scroll-sites.js", "subtitle-extractor.js", "subtitle-downloads.js", "subtitle-translation-router.js", "link-preview-background.js");
 
 const DEFAULT_SETTINGS = {
   disableNewTabFavoritesRedirect: false,

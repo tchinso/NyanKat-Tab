@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "NyanKatX3 Tab",
-  "version": "1.3.4",
-  "description": "New tab redirect, subtitle downloads and overlay, Base64 decoding, floating auto-scroll, and kio.ac download status.",
+  "version": "1.5.0",
+  "description": "New tab redirect, link previews, selected-text translation, subtitle tools, Base64 decoding, floating auto-scroll, and kio.ac download status.",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
@@ -29,7 +29,8 @@
     "storage",
     "webNavigation",
     "webRequest",
-    "downloads"
+    "downloads",
+    "declarativeNetRequest"
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
   "content_scripts": [
@@ -44,6 +45,19 @@
     {
       "matches": ["http://*/*", "https://*/*"],
       "js": ["subtitle-detector.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_origin_as_fallback": true
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["link-preview.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["drag-hover-translation.js"],
       "run_at": "document_start",
       "all_frames": true,
       "match_origin_as_fallback": true
@@ -123,7 +137,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["fonts/*.woff", "fonts/*.woff2", "fonts/*.ttf", "subtitle-translation-host.html"],
+      "resources": ["fonts/*.woff", "fonts/*.woff2", "fonts/*.ttf", "subtitle-translation-host.html", "drag-hover-translation-host.html", "drag-hover-translation-settings.html", "link-preview-frame.html", "link-preview-frame.js", "link-preview-frame.css", "link-preview.css"],
       "matches": ["http://*/*", "https://*/*"]
     }
   ],

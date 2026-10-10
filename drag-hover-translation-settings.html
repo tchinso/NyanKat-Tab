@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>드래그 후 호버 번역 설정</title>
+    <link rel="stylesheet" href="drag-hover-translation-settings.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>드래그 후 호버 번역</h1>
+        <button id="close" type="button" aria-label="설정 닫기">×</button>
+      </header>
+      <p>웹페이지에서 텍스트를 드래그하여 선택한 뒤 선택 영역에 마우스를 올리면 한국어 번역을 표시합니다.</p>
+      <label class="switch-row" for="enabled">
+        <span>번역 사용</span>
+        <input id="enabled" type="checkbox">
+      </label>
+      <p id="settingStatus" class="status" aria-live="polite"></p>
+      <section>
+        <h2>언어 감지 모델</h2>
+        <p>첫 사용 시 브라우저가 모델을 다운로드합니다.</p>
+        <p id="detectorStatus" class="status" aria-live="polite">상태 확인 중…</p>
+        <button id="prepareDetector" type="button" disabled>언어 감지 모델 준비</button>
+      </section>
+      <section>
+        <h2>한국어 번역 모델</h2>
+        <label for="language">원문 언어</label>
+        <select id="language">
+          <option value="en">영어</option>
+          <option value="ja">일본어</option>
+          <option value="zh">중국어</option>
+          <option value="zh-Hant">중국어(번체)</option>
+          <option value="es">스페인어</option>
+          <option value="fr">프랑스어</option>
+          <option value="de">독일어</option>
+          <option value="ru">러시아어</option>
+          <option value="pt">포르투갈어</option>
+        </select>
+        <p id="translatorStatus" class="status" aria-live="polite">상태 확인 중…</p>
+        <button id="prepareTranslator" type="button" disabled>선택한 언어의 번역 모델 준비</button>
+        <p class="hint">다른 언어의 모델이 필요하면 언어를 바꿔 준비하세요. 웹페이지의 번역 툴팁에서도 감지한 언어의 모델을 준비할 수 있습니다.</p>
+      </section>
+    </main>
+    <script src="drag-hover-translation-settings.js"></script>
+  </body>
+</html>

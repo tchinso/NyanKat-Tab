@@ -9,12 +9,16 @@ Chrome MV3 extension for:
 - decoding selected Base64 text from the `NyanKatX3 Tab` right-click menu, including up to three nested Base64 layers
 - automatically decoding detected Base64 text on `kone.gg`, with nested decoding, clickable links, copy buttons, and original text reveal
 - showing floating auto-scroll buttons with configurable opacity and site exclusions
+- previewing links in a movable popup after a long click, long hover, or link drag
+- translating dragged text selections into Korean on hover with the browser's Language Detector and Translator APIs
 - downloading detected soft subtitles from the popup's separate **자막추출** tab
 - applying local subtitles to videos using the existing **자막** overlay tab
 - streaming subtitle translation into Korean using the browser's on-device Translator API, with a saved literal postprocessing dictionary
 - saving every subtitle display option, including built-in/installed fonts, text spacing, gradient fills, outlines, backgrounds, and shadows
 - unlocking disabled `button` elements, closing newly opened tooltips and the Kiosk support popup, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
 - persisting the YouTube, kone.gg decoder, and floating scroll settings across browser restarts
+
+Version **1.5.0** adds link previews and on-device selected-text translation. Link previews support three gestures, a five-button toolbar, and an optional outside-click close action. Translation model setup opens inside the active page so model downloads start from a direct click in the extension frame.
 
 Version **1.3.4** refreshes kio.ac download detection every two seconds and lets each open download-status page request a fresh scan. When the detected `B/s)` count falls from a positive value to zero and stays there for one second, each open status page plays an approximately two-second chime generated with Web Audio. If the browser blocks automatic sound, click **완료음 켜기** on each status page to enable it.
 
@@ -26,6 +30,7 @@ Version **1.3.4** refreshes kio.ac download detection every two seconds and lets
 - `webNavigation`: detects failed top-level navigations to the primary and first fallback URLs.
 - `webRequest`: observes subtitle/manifest response URLs in the current tab, including embedded players and worker requests. It does not intercept video bodies.
 - `downloads`: saves validated subtitle files after the user presses **다운로드**.
+- `declarativeNetRequest`: while a link preview is open, removes frame-blocking response headers from subframe responses in that tab so linked pages can load and navigate inside the popup. The temporary rule is removed when the popup closes or the tab navigates.
 - `host_permissions` for HTTP(S): reads discovered subtitle files and subtitle manifests from their CDN origins.
 - `content_scripts.matches` for `https://www.youtube.com/*`: runs the YouTube watch-page helper.
 - `content_scripts.matches` for `https://kone.gg/*` and `https://*.kone.gg/*`: runs the automatic Base64 decoder only on kone.gg pages.
@@ -33,6 +38,12 @@ Version **1.3.4** refreshes kio.ac download detection every two seconds and lets
 - `content_scripts.matches` for `http://*/*` and `https://*/*`: displays the local Base64 decode result in the selected frame. The floating auto-scroll buttons are shown once in the top-level page on configured hosts or sites covered by the default scroll setting.
 
 No `tabs`, `scripting`, `activeTab`, `clipboardWrite`, `notifications`, or remote-code permissions are requested. Subtitle discovery and parsing run locally; downloading only requests the discovered resources from their original sites/CDNs. Subtitle bodies are kept in a bounded page-memory cache, and temporary discovery metadata is kept in extension session storage. Nothing is uploaded to a separate extraction service.
+
+## Link preview and selected-text translation
+
+In **기본**, open **팝업으로 링크 미리보기 설정 열기** below the kio.ac download-status button. Choose one activation gesture: long click, long hover, or link drag. Long-click and long-hover delays are saved in 50 ms steps. The preview toolbar groups **고정**, **확대**, **축소**, **최대화**, and **닫기** at the top. The close button is always available; closing by clicking outside is optional. **최대화** fills the page viewport rather than entering browser fullscreen. The popup can also be moved or resized.
+
+Below the Favorites setting, **드래그 후 호버 하여 번역 사용** opens a setup popup inside the current HTTP(S) web page. Enable the feature there and prepare the language-detection model and any source-language-to-Korean translation models needed by clicking their buttons. Selecting text with a mouse drag and hovering over that selection opens a Korean translation tooltip. If a newly detected language needs a model, the tooltip offers a direct preparation button. Both APIs run in a browser extension frame inside the tab; selected text is not sent to Google Translate. API availability depends on the browser's model and policy state, which the setup popup reports.
 
 ## Soft-subtitle downloads
 
