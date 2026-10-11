@@ -19,6 +19,7 @@ function event() {
 function harness() {
   const pendingReads = [];
   const scanRequests = [];
+  const tabUpdates = [];
   const stored = {};
   let readCount = 0;
   const session = {
@@ -43,10 +44,13 @@ function harness() {
         scanRequests.push({ tabId, message, options });
         callback({ ok: true });
       },
-      update() {}
+      update(tabId, options, callback) {
+        tabUpdates.push({ tabId, options });
+        callback?.();
+      }
     },
     webNavigation: {
-      onCommitted: event(), onHistoryStateUpdated: event(), onErrorOccurred: event(),
+      onBeforeNavigate: event(), onCommitted: event(), onHistoryStateUpdated: event(), onErrorOccurred: event(),
       getAllFrames: async () => []
     },
     webRequest: { onHeadersReceived: event() },
@@ -81,7 +85,7 @@ function harness() {
   }
 
   return {
-    chrome, dispatch, connect, pendingReads, scanRequests, stored,
+    chrome, dispatch, connect, pendingReads, scanRequests, tabUpdates, stored,
     get readCount() { return readCount; }
   };
 }
@@ -117,6 +121,25 @@ test("kio stats restore once and retain reports received while storage is loadin
   const afterNavigation = await h.dispatch({ type: "nyankat-kio-download-get-stats" });
   assert.equal(afterNavigation.entries.length, 1, "navigation clears the old download frame");
   assert.equal(afterNavigation.entries[0].tabId, 8);
+});
+
+test("fallback navigation ignores canceled and superseded page loads", () => {
+  const h = harness();
+  const failed = { tabId: 4, frameId: 0, url: "https://fav.ju.mp/", error: "net::ERR_NAME_NOT_RESOLVED" };
+  h.chrome.webNavigation.onBeforeNavigate.emit(failed);
+  h.chrome.webNavigation.onErrorOccurred.emit({ ...failed, error: "net::ERR_ABORTED" });
+  assert.equal(h.tabUpdates.length, 0);
+
+  h.chrome.webNavigation.onBeforeNavigate.emit(failed);
+  h.chrome.webNavigation.onBeforeNavigate.emit({ tabId: 4, frameId: 0, url: "https://example.com/" });
+  h.chrome.webNavigation.onErrorOccurred.emit(failed);
+  assert.equal(h.tabUpdates.length, 0);
+
+  h.chrome.webNavigation.onBeforeNavigate.emit(failed);
+  h.chrome.webNavigation.onErrorOccurred.emit(failed);
+  assert.equal(h.tabUpdates.length, 1);
+  assert.equal(h.tabUpdates[0].tabId, 4);
+  assert.equal(h.tabUpdates[0].options.url, "https://12tw.pages.dev/");
 });
 
 test("a disconnected status page cannot block updates to other open pages", async () => {

@@ -56,6 +56,7 @@ const FALLBACK_BY_HOST = {
   "fav.ju.mp": "https://12tw.pages.dev/",
   "12tw.pages.dev": "https://tchinso.github.io/fav/"
 };
+const pendingTopLevelNavigations = new Map();
 
 let kioDownloadStats = {};
 const kioDownloadPorts = new Set();
@@ -560,11 +561,22 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   sendBase64Result(tab.id, info.frameId, decodeBase64Repeatedly(info.selectionText || ""));
 });
 
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+  if (details.frameId === 0 && details.tabId >= 0) {
+    pendingTopLevelNavigations.set(details.tabId, details.url);
+  }
+});
+
 chrome.webNavigation.onErrorOccurred.addListener(
   (details) => {
     if (details.frameId !== 0 || details.tabId < 0) {
       return;
     }
+
+    const isCurrentNavigation = pendingTopLevelNavigations.get(details.tabId) === details.url;
+    if (!isCurrentNavigation) return;
+    pendingTopLevelNavigations.delete(details.tabId);
+    if (details.error === "net::ERR_ABORTED") return;
 
     let failedUrl;
     try {
@@ -592,12 +604,17 @@ chrome.webNavigation.onErrorOccurred.addListener(
 );
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  pendingTopLevelNavigations.delete(tabId);
   restoreKioDownloadStats(() => removeKioDownloadStatsForTab(tabId));
 });
 
 chrome.webNavigation.onCommitted.addListener((details) => {
   if (details.tabId < 0 || details.frameId < 0) {
     return;
+  }
+
+  if (details.frameId === 0) {
+    pendingTopLevelNavigations.delete(details.tabId);
   }
 
   restoreKioDownloadStats(() => {

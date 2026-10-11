@@ -23,8 +23,12 @@ function harness(syncData = {}, localData = {}, options = {}) {
       },
       async set(values) {
         if (options.failSync && name === "sync") throw new Error("sync quota exceeded");
+        if (options.failLocal && name === "local") throw new Error("local quota exceeded");
         Object.assign(data, plain(values));
         writes.push({ name, values: plain(values) });
+      },
+      async remove(keys) {
+        for (const key of keys) delete data[key];
       }
     };
   }
@@ -130,4 +134,15 @@ test("sync write failure does not change local subtitle settings", async () => {
   await assert.rejects(h.transfer.applyImport(h.transfer.parseImport(JSON.stringify(file))), /quota/);
   assert.equal(h.local.subtitleStyle.fontSize, 20);
   assert.equal(h.writes.length, 0);
+});
+
+test("local write failure restores existing and newly created sync settings", async () => {
+  const h = harness({ sendZeroOnYouTube: true }, {}, { failLocal: true });
+  const file = { format: "nyankatx3-tab-settings", schemaVersion: 1,
+    sync: { sendZeroOnYouTube: false, enableKoneBase64AutoDecode: false },
+    local: { subtitlePostprocessDictionary: "hello=안녕하세요" } };
+  await assert.rejects(h.transfer.applyImport(h.transfer.parseImport(JSON.stringify(file))), /local quota/);
+  assert.equal(h.sync.sendZeroOnYouTube, true);
+  assert.equal(Object.hasOwn(h.sync, "enableKoneBase64AutoDecode"), false);
+  assert.equal(Object.hasOwn(h.local, "subtitlePostprocessDictionary"), false);
 });

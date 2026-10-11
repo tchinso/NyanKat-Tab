@@ -13,14 +13,13 @@
   const OPEN_SETTINGS = "NYANKAT_DRAG_HOVER_TRANSLATION_OPEN_SETTINGS";
   const SETTINGS_CHANNEL = "nyankat-drag-hover-translation-settings";
   const MAX_TEXT_LENGTH = 4000;
-  const HOVER_DELAY_MS = 230;
   const HIDE_DELAY_MS = 450;
   const WIDTH = 390;
 
   let enabled = false;
   let selection = null;
   let dragStart = null;
-  let hoverTimer = 0;
+  let dragTimer = 0;
   let hideTimer = 0;
   let host = null;
   let frame = null;
@@ -39,9 +38,9 @@
   let anchor = { x: 0, y: 0 };
 
   function clearTimers() {
-    clearTimeout(hoverTimer);
+    clearTimeout(dragTimer);
     clearTimeout(hideTimer);
-    hoverTimer = 0;
+    dragTimer = 0;
     hideTimer = 0;
   }
 
@@ -132,7 +131,7 @@
     dragHandle.addEventListener("pointerup", stopDrag);
     dragHandle.addEventListener("pointercancel", stopDrag);
     settingsFrame = document.createElement("iframe");
-    settingsFrame.title = "드래그 후 호버 번역 설정";
+    settingsFrame.title = "드래그 번역 설정";
     settingsFrame.setAttribute("allow", "language-detector; translator");
     settingsFrame.style.cssText = "flex:1 1 auto;display:block;width:100%;min-height:0;border:0;background:#f4f7fb;";
     settingsFrame.src = SETTINGS_URL + "#" + settingsToken;
@@ -200,8 +199,6 @@
   }
 
   function scheduleHide() {
-    clearTimeout(hoverTimer);
-    hoverTimer = 0;
     if (!visible || overTooltip || hideTimer) return;
     hideTimer = setTimeout(() => {
       hideTimer = 0;
@@ -221,21 +218,6 @@
     }
     return Array.from(selection.range.getClientRects()).some(rect =>
       x >= rect.left - 3 && x <= rect.right + 3 && y >= rect.top - 3 && y <= rect.bottom + 3);
-  }
-
-  function hoverAt(x, y) {
-    if (!enabled || !selection || selection.text === dismissedText) return;
-    if (!selectedAt(x, y)) {
-      scheduleHide();
-      return;
-    }
-    clearTimeout(hideTimer);
-    hideTimer = 0;
-    if (visible || hoverTimer) return;
-    hoverTimer = setTimeout(() => {
-      hoverTimer = 0;
-      if (selectedAt(x, y)) showAt(x, y);
-    }, HOVER_DELAY_MS);
   }
 
   function selectedControl(target) {
@@ -259,8 +241,7 @@
     const text = nativeSelection.toString().trim();
     if (!text || text.length > MAX_TEXT_LENGTH) return null;
     const range = nativeSelection.getRangeAt(0).cloneRange();
-    if (!document.documentElement.contains(range.commonAncestorContainer)) return null;
-    if (!range.getClientRects().length) return null;
+    if (!range.startContainer.isConnected || !range.endContainer.isConnected) return null;
     return { kind: "range", range, text };
   }
 
@@ -272,26 +253,29 @@
 
     document.addEventListener("mousedown", event => {
       if (!enabled || event.button !== 0) return;
-      dragStart = { x: event.clientX, y: event.clientY };
+      clearTimeout(dragTimer);
+      dragTimer = 0;
+      dragStart = { x: event.clientX, y: event.clientY, target: event.target };
     }, { capture: true, signal });
 
     document.addEventListener("mouseup", event => {
       if (!enabled || event.button !== 0 || !dragStart) return;
-      const moved = Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y) >= 4;
+      const start = dragStart;
+      const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 3;
       dragStart = null;
       if (!moved) return;
-      const next = captureSelection(event.target);
-      if (!next) { resetSelection(); return; }
-      hide();
-      selection = next;
-      dismissedText = "";
-      shownText = "";
-      hoverAt(event.clientX, event.clientY);
-    }, { capture: true, signal });
-
-    document.addEventListener("mousemove", event => {
-      if (!enabled || event.buttons) return;
-      hoverAt(event.clientX, event.clientY);
+      const { clientX: x, clientY: y, target } = event;
+      dragTimer = setTimeout(() => {
+        dragTimer = 0;
+        if (!enabled) return;
+        const next = captureSelection(start.target) || captureSelection(target);
+        if (!next) { resetSelection(); return; }
+        hide();
+        selection = next;
+        dismissedText = "";
+        shownText = "";
+        showAt(x, y);
+      }, 0);
     }, { capture: true, signal });
 
     document.addEventListener("selectionchange", () => {

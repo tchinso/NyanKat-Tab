@@ -73,7 +73,7 @@ test("settings panel is 300 by 220 pixels and can be moved within the viewport",
   handle.fire("pointerup", { pointerId: 3 });
 });
 
-test("using drag-hover translation enables it before opening its settings", async () => {
+test("using drag translation enables it before opening its settings", async () => {
   const controls = new Map();
   for (const id of ["#sendZeroOnYouTube", "#enableKoneBase64AutoDecode", "#disableNewTabFavoritesRedirect", "#status", "#openScrollSettings", "#openScrollPositionMode", "#openKioDownload", "#openLinkPreviewSettings", "#openDragHoverTranslationSettings"]) controls.set(id, element(id));
   const steps = [];
@@ -105,4 +105,35 @@ test("using drag-hover translation enables it before opening its settings", asyn
   assert.equal(steps[1], "query");
   assert.deepEqual(steps[2], ["sendMessage", 7, "NYANKAT_DRAG_HOVER_TRANSLATION_OPEN_SETTINGS", 0]);
   assert.equal(steps[3], "close");
+});
+
+test("a failed popup setting save restores the checkbox and leaves an error status", () => {
+  const controls = new Map();
+  for (const id of ["#sendZeroOnYouTube", "#enableKoneBase64AutoDecode", "#disableNewTabFavoritesRedirect", "#status", "#openScrollSettings", "#openScrollPositionMode", "#openKioDownload", "#openLinkPreviewSettings", "#openDragHoverTranslationSettings"]) controls.set(id, element(id));
+  const document = {
+    querySelector(id) { return controls.get(id); },
+    querySelectorAll() { return []; },
+    dispatchEvent() {}
+  };
+  const timers = [];
+  const window = { setTimeout(callback) { timers.push(callback); return timers.length; }, clearTimeout() {} };
+  const chrome = {
+    runtime: { lastError: null },
+    storage: { sync: {
+      get(defaults, callback) { callback(defaults); },
+      set(_values, callback) {
+        chrome.runtime.lastError = { message: "quota exceeded" };
+        callback();
+        chrome.runtime.lastError = null;
+      }
+    } }
+  };
+  vm.runInNewContext(popupScript, { document, window, chrome, CustomEvent: class {} });
+  const control = controls.get("#sendZeroOnYouTube");
+  assert.equal(control.checked, true);
+  control.checked = false;
+  control.fire("change");
+  assert.equal(control.checked, true);
+  assert.equal(controls.get("#status").textContent, "저장 실패");
+  assert.equal(timers.length, 0);
 });

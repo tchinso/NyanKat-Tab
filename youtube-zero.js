@@ -125,7 +125,12 @@ function sendZeroAfterVideoLoads(video, videoKey) {
 }
 
 function handleWatchPage() {
-  if (!sendZeroOnYouTube || !isWatchPage()) {
+  if (!isWatchPage()) {
+    lastHandledVideoKey = "";
+    return;
+  }
+
+  if (!sendZeroOnYouTube) {
     return;
   }
 
@@ -137,7 +142,14 @@ function handleWatchPage() {
   lastHandledVideoKey = videoKey;
 
   waitForVideoElement().then((video) => {
-    if (!video || !sendZeroOnYouTube || getVideoKey() !== videoKey) {
+    if (!video) {
+      if (getVideoKey() === videoKey) {
+        lastHandledVideoKey = "";
+        scheduleHandleWatchPage();
+      }
+      return;
+    }
+    if (!sendZeroOnYouTube || getVideoKey() !== videoKey) {
       return;
     }
 

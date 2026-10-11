@@ -204,6 +204,26 @@ test("style changes remove stale effects and subtitle gaps hide the background b
   assert.match(h.layer("outline").style.textShadow, /#123456/);
 });
 
+test("an earlier long cue remains visible after shorter overlapping cues end", async () => {
+  const h = await harness();
+  const subtitle = [
+    "1", "00:00:00,000 --> 00:00:10,000", "Long cue", "",
+    "2", "00:00:02,000 --> 00:00:03,000", "Short cue", "",
+    "3", "00:00:04,000 --> 00:00:05,000", "Another short cue"
+  ].join("\n");
+  const result = h.message("NYANKAT_SUBTITLE_LOAD", {
+    filename: "overlap.srt", encoding: "utf-8", offsetMs: 0,
+    b64: Buffer.from(subtitle).toString("base64")
+  });
+  assert.equal(result.ok, true);
+  h.video.currentTime = 2.5;
+  h.video.emit("timeupdate");
+  assert.equal(h.layer("fill").textContent, "Short cue");
+  h.video.currentTime = 7;
+  h.video.emit("timeupdate");
+  assert.equal(h.layer("fill").textContent, "Long cue");
+});
+
 test("font warming follows changed fonts and storage changes update existing and newly found videos", async () => {
   const h = await harness({ saved: { subtitleStyle: customStyle } });
   assert.deepEqual(plain(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.settings), customStyle);

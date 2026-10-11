@@ -51,7 +51,7 @@ function harness(fetchFont = async () => new Response(fontBytes())) {
     },
     tabs: { onRemoved: event(), sendMessage() {}, update() {} },
     webNavigation: {
-      onCommitted: event(), onHistoryStateUpdated: event(), onErrorOccurred: event(),
+      onBeforeNavigate: event(), onCommitted: event(), onHistoryStateUpdated: event(), onErrorOccurred: event(),
       getAllFrames: async () => []
     },
     webRequest: { onHeadersReceived: event() },

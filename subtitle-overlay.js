@@ -135,6 +135,7 @@
       id: "video-" + nextVideoId++,
       video,
       cues: [],
+      cueEndPrefixes: [],
       currentCueIndex: -1,
       offsetMs: 0,
       settings: { ...savedStyle },
@@ -528,20 +529,18 @@
     });
   }
 
-  function findCueIndex(cues, time) {
+  function findCueIndex(cues, cueEndPrefixes, time) {
     let low = 0;
-    let high = cues.length - 1;
+    let high = cues.length;
 
-    while (low <= high) {
+    while (low < high) {
       const middle = (low + high) >> 1;
-      const cue = cues[middle];
-      if (time < cue.start) {
-        high = middle - 1;
-      } else if (time > cue.end) {
-        low = middle + 1;
-      } else {
-        return middle;
-      }
+      if (cues[middle].start <= time) low = middle + 1;
+      else high = middle;
+    }
+
+    for (let index = low - 1; index >= 0 && cueEndPrefixes[index] >= time; index -= 1) {
+      if (cues[index].end >= time) return index;
     }
 
     return -1;
@@ -553,7 +552,7 @@
     }
 
     const time = (Number(record.video.currentTime) || 0) - record.offsetMs / 1000;
-    const cueIndex = findCueIndex(record.cues, time);
+    const cueIndex = findCueIndex(record.cues, record.cueEndPrefixes, time);
     if (cueIndex === record.currentCueIndex) {
       return;
     }
@@ -854,6 +853,11 @@
     }
 
     record.cues = cues;
+    let latestEnd = -Infinity;
+    record.cueEndPrefixes = cues.map((cue) => {
+      latestEnd = Math.max(latestEnd, cue.end);
+      return latestEnd;
+    });
     disconnectTranslation(record);
     record.sourceLanguage = window.NyanKatSubtitleTranslation?.normalizeLanguage(payload.sourceLanguage) || "ko";
     record.currentCueIndex = -2;
@@ -868,6 +872,7 @@
     stopCueUpdates(record);
     disconnectTranslation(record);
     record.cues = [];
+    record.cueEndPrefixes = [];
     record.currentCueIndex = -1;
     if (record.overlay) {
       record.overlay.remove();

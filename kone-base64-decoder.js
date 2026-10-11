@@ -30,9 +30,7 @@ const KONE_B64_PREFIX_RE = new RegExp(
 );
 
 const decodedClass = "nyankat-kone-b64-decoded-" + Math.random().toString(36).slice(2, 8);
-const processedNodes = new WeakSet();
-const recentlyDecoded = new Map();
-const dedupeWindowMs = 500;
+const processedNodes = new WeakMap();
 let observer = null;
 let observerTimer = 0;
 let pendingNodes = new Set();
@@ -417,7 +415,8 @@ function isIgnoredNode(node) {
 }
 
 function processTextNode(textNode) {
-  if (!enabled || !textNode || !textNode.textContent || processedNodes.has(textNode)) {
+  if (!enabled || !textNode || !textNode.textContent ||
+      processedNodes.get(textNode) === textNode.textContent) {
     return 0;
   }
 
@@ -453,23 +452,6 @@ function processTextNode(textNode) {
       continue;
     }
 
-    const recentTime = recentlyDecoded.get(final.decoded);
-    if (recentTime && Date.now() - recentTime < dedupeWindowMs) {
-      fragment.append(document.createTextNode(match.encoded));
-      lastIndex = match.index + match.length;
-      continue;
-    }
-
-    recentlyDecoded.set(final.decoded, Date.now());
-    if (recentlyDecoded.size > 500) {
-      const cutoff = Date.now() - dedupeWindowMs * 3;
-      for (const [key, time] of recentlyDecoded) {
-        if (time < cutoff) {
-          recentlyDecoded.delete(key);
-        }
-      }
-    }
-
     fragment.append(createDecodedElement(match.encoded, final.decoded, final.depth));
     replacedCount += 1;
     lastIndex = match.index + match.length;
@@ -479,7 +461,7 @@ function processTextNode(textNode) {
     fragment.append(document.createTextNode(textNode.textContent.slice(lastIndex)));
   }
 
-  processedNodes.add(textNode);
+  processedNodes.set(textNode, textNode.textContent);
 
   if (replacedCount > 0) {
     if (observer) {
@@ -489,7 +471,7 @@ function processTextNode(textNode) {
     parent.replaceChild(fragment, textNode);
 
     if (observer && document.body) {
-      observer.observe(document.body, { childList: true, subtree: true });
+      observer.observe(document.body, { childList: true, characterData: true, subtree: true });
     }
   }
 
@@ -544,11 +526,11 @@ function startDecoder() {
 
   observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
-      scheduleProcess(mutation.addedNodes);
+      scheduleProcess(mutation.type === "characterData" ? [mutation.target] : mutation.addedNodes);
     }
   });
 
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, { childList: true, characterData: true, subtree: true });
   for (const delay of KONE_B64_CONFIG.rescanDelays) {
     window.setTimeout(() => processNode(document.body), delay);
   }

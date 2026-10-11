@@ -201,8 +201,29 @@
     if (own(settings.local, "subtitlePostprocessDictionary")) {
       localWrite.subtitlePostprocessDictionary = settings.local.subtitlePostprocessDictionary;
     }
-    if (Object.keys(settings.sync).length) await chrome.storage.sync.set(settings.sync);
-    if (Object.keys(localWrite).length) await chrome.storage.local.set(localWrite);
+    const syncKeys = Object.keys(settings.sync);
+    const hasLocalWrite = Object.keys(localWrite).length > 0;
+    const previousSync = syncKeys.length && hasLocalWrite
+      ? await chrome.storage.sync.get(syncKeys) : {};
+    if (syncKeys.length) await chrome.storage.sync.set(settings.sync);
+    if (!hasLocalWrite) return;
+
+    try {
+      await chrome.storage.local.set(localWrite);
+    } catch (error) {
+      if (syncKeys.length) {
+        try {
+          const restore = Object.fromEntries(syncKeys.filter(key => own(previousSync, key))
+            .map(key => [key, previousSync[key]]));
+          const remove = syncKeys.filter(key => !own(previousSync, key));
+          if (Object.keys(restore).length) await chrome.storage.sync.set(restore);
+          if (remove.length) await chrome.storage.sync.remove(remove);
+        } catch {
+          throw new Error("설정 일부가 변경되었을 수 있습니다. 저장된 설정을 확인하세요.");
+        }
+      }
+      throw error;
+    }
   }
 
   window.NyanKatSettingsTransfer = { buildExport, parseImport, applyImport };

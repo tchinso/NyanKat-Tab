@@ -20,11 +20,13 @@ const openLinkPreviewSettingsButton = document.querySelector("#openLinkPreviewSe
 const openDragHoverTranslationSettingsButton = document.querySelector("#openDragHoverTranslationSettings");
 const tabButtons = Array.from(document.querySelectorAll("[role='tab']"));
 const tabPanels = Array.from(document.querySelectorAll("[role='tabpanel']"));
+const savedCheckboxValues = {};
 let statusTimer = 0;
 
 function setStatus(text) {
   window.clearTimeout(statusTimer);
   statusElement.textContent = text;
+  if (text === "저장 실패") return;
   statusTimer = window.setTimeout(() => {
     statusElement.textContent = "저장됨";
   }, 1800);
@@ -32,7 +34,13 @@ function setStatus(text) {
 
 function saveSetting(key, value) {
   chrome.storage.sync.set({ [key]: value }, () => {
-    setStatus(chrome.runtime.lastError ? "저장 실패" : "저장됨");
+    if (chrome.runtime.lastError) {
+      checkboxControls[key].checked = savedCheckboxValues[key];
+      setStatus("저장 실패");
+      return;
+    }
+    savedCheckboxValues[key] = value;
+    setStatus("저장됨");
   });
 }
 
@@ -89,6 +97,7 @@ function enableScrollPositionMode() {
 chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
   for (const [key, control] of Object.entries(checkboxControls)) {
     control.checked = settings[key] === undefined ? DEFAULT_SETTINGS[key] : Boolean(settings[key]);
+    savedCheckboxValues[key] = control.checked;
     control.addEventListener("change", () => {
       saveSetting(key, control.checked);
     });

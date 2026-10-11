@@ -10,13 +10,15 @@ Chrome MV3 extension for:
 - automatically decoding detected Base64 text on `kone.gg`, with nested decoding, clickable links, copy buttons, and original text reveal
 - showing floating auto-scroll buttons with configurable opacity and site exclusions
 - previewing links in a movable popup after a long click, long hover, or link drag
-- translating dragged text selections into Korean on hover with the browser's Language Detector and Translator APIs
+- translating dragged text selections into Korean when the drag ends with the browser's Language Detector and Translator APIs
 - downloading detected soft subtitles from the popup's separate **자막추출** tab
 - applying local subtitles to videos using the existing **자막** overlay tab
 - streaming subtitle translation into Korean using the browser's on-device Translator API, with a saved literal postprocessing dictionary
 - saving every subtitle display option, including built-in/installed fonts, text spacing, gradient fills, outlines, backgrounds, and shadows
 - unlocking disabled `button` elements, closing newly opened tooltips and the Kiosk support popup, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
 - persisting the YouTube, kone.gg decoder, and floating scroll settings across browser restarts
+
+Version **1.5.2** reorders the Basic tab actions, starts translation when a text drag ends without requiring a hover, and fixes repeated YouTube visits, Base64 decoding on changing page text, overlapping subtitle cues, failed setting saves and imports, and canceled fallback navigations.
 
 Version **1.5.1** makes the drag-hover translation panel compact and movable, enables translation when its use button is pressed, prepares detection and the selected translation pair from one button, adds portable JSON settings backup, and translates five upcoming subtitle cues ahead of playback.
 
@@ -45,7 +47,7 @@ No `tabs`, `scripting`, `activeTab`, `clipboardWrite`, `notifications`, or remot
 
 In **기본**, open **팝업으로 링크 미리보기 설정 열기** below the kio.ac download-status button. Choose one activation gesture: long click, long hover, or link drag. Long-click and long-hover delays are saved in 50 ms steps. The preview toolbar groups **고정**, **확대**, **축소**, **최대화**, and **닫기** at the top. The close button is always available; closing by clicking outside is optional. **최대화** fills the page viewport rather than entering browser fullscreen. The popup can also be moved or resized.
 
-Below the Favorites setting, **드래그 후 호버 하여 번역 사용** enables translation and opens a compact setup popup inside the current HTTP(S) web page. Drag its top handle to uncover page content, and scroll inside the popup for the model controls. Choose a source language and click **언어 감지·번역 모델 함께 준비** to prepare both browser models in one action. Selecting text with a mouse drag and hovering over that selection opens a Korean translation tooltip. If a newly detected language needs a model, the tooltip offers a direct preparation button. Both APIs run in a browser extension frame inside the tab; selected text is not sent to Google Translate. API availability depends on the browser's model and policy state, which the setup popup reports.
+In **기본**, **드래그하여 번역 사용** enables translation and opens a compact setup popup inside the current HTTP(S) web page. Drag its top handle to uncover page content, and scroll inside the popup for the model controls. Choose a source language and click **언어 감지·번역 모델 함께 준비** to prepare both browser models in one action. Selecting text with a mouse drag opens a Korean translation tooltip when the drag ends. If a newly detected language needs a model, the tooltip offers a direct preparation button. Both APIs run in a browser extension frame inside the tab; selected text is not sent to Google Translate. API availability depends on the browser's model and policy state, which the setup popup reports.
 
 In **기본**, **설정 내보내기** saves the persistent options, subtitle style, and postprocessing dictionary as JSON; **설정 불러오기** restores them. A PC-installed subtitle font is omitted from the file, and importing keeps the receiving PC's current font choice. Built-in extension font choices can be transferred.
 
