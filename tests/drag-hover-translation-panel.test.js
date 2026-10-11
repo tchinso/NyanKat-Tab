@@ -20,8 +20,8 @@ function element(tag) {
     append(...children) { this.children.push(...children); },
     remove() { this.isConnected = false; },
     getBoundingClientRect() {
-      const width = 240;
-      const height = 164;
+      const width = 300;
+      const height = 220;
       const left = this.style.left ? Number.parseFloat(this.style.left) : 1000 - width - 12;
       const top = Number.parseFloat(this.style.top || this.style.cssText?.match(/top:(\d+)px/)?.[1]) || 0;
       return { left, top, width, height };
@@ -30,7 +30,7 @@ function element(tag) {
   };
 }
 
-test("settings panel is about one sixth the former area and can be moved within the viewport", () => {
+test("settings panel is 300 by 220 pixels and can be moved within the viewport", () => {
   const root = element("html");
   root.append = function (...children) { this.children.push(...children); for (const child of children) child.isConnected = true; };
   let runtimeListener;
@@ -60,17 +60,16 @@ test("settings panel is about one sixth the former area and can be moved within 
   assert.equal(response.ok, true);
   const panel = root.children[0].shadow.children[0];
   const [handle, frame] = panel.children;
-  assert.match(panel.style.cssText, /width:min\(240px/);
-  assert.match(panel.style.cssText, /height:min\(164px/);
-  assert.ok(240 * 164 <= 440 * 560 / 6);
+  assert.match(panel.style.cssText, /width:min\(300px/);
+  assert.match(panel.style.cssText, /height:min\(220px/);
   assert.equal(frame.tag, "iframe");
   handle.fire("pointerdown", { button: 0, pointerId: 3, clientX: 800, clientY: 30, preventDefault() {} });
   handle.fire("pointermove", { pointerId: 3, clientX: 500, clientY: 120 });
-  assert.equal(panel.style.left, "448px");
+  assert.equal(panel.style.left, "388px");
   assert.equal(panel.style.top, "102px");
   handle.fire("pointermove", { pointerId: 3, clientX: -1000, clientY: 1000 });
   assert.equal(panel.style.left, "0px");
-  assert.equal(panel.style.top, "436px");
+  assert.equal(panel.style.top, "380px");
   handle.fire("pointerup", { pointerId: 3 });
 });
 

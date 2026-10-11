@@ -105,7 +105,7 @@
     settingsPanel = document.createElement("div");
     // The compact settings panel leaves the page visible while its handle lets
     // the user uncover text underneath it without closing the settings.
-    settingsPanel.style.cssText = "position:fixed;top:12px;right:12px;width:min(240px,calc(100vw - 16px));height:min(164px,calc(100vh - 16px));display:flex;flex-direction:column;box-sizing:border-box;border:1px solid #8da5be;border-radius:9px;background:#f4f7fb;box-shadow:0 8px 24px rgba(0,0,0,.28);overflow:hidden;z-index:2147483647;";
+    settingsPanel.style.cssText = "position:fixed;top:12px;right:12px;width:min(300px,calc(100vw - 16px));height:min(220px,calc(100vh - 16px));display:flex;flex-direction:column;box-sizing:border-box;border:1px solid #8da5be;border-radius:9px;background:#f4f7fb;box-shadow:0 8px 24px rgba(0,0,0,.28);overflow:hidden;z-index:2147483647;";
     const dragHandle = document.createElement("div");
     dragHandle.textContent = "번역 설정 · 드래그하여 이동";
     dragHandle.title = "드래그하여 설정 창 이동";
