@@ -35,6 +35,7 @@ function harness(options = {}) {
     translatorReady: options.translatorReady !== false,
     detectorCreate: 0,
     translatorCreate: 0,
+    translatorAttempts: 0,
     detections: 0,
     translates: 0,
     activation: false,
@@ -57,7 +58,10 @@ function harness(options = {}) {
     async availability() { return state.translatorReady ? "available" : "downloadable"; },
     create(pair) {
       assert.deepEqual({ ...pair, monitor: undefined }, { sourceLanguage: "en", targetLanguage: "ko", monitor: undefined });
-      if (!state.translatorReady) assert.equal(state.activation, true, "translation model download starts in the iframe click");
+      state.translatorAttempts += 1;
+      if (!state.translatorReady && !options.allowDelayedCreate && !state.activation) {
+        throw new Error("model download needs a fresh click");
+      }
       state.translatorReady = true;
       state.translatorCreate += 1;
       return Promise.resolve({
@@ -98,7 +102,7 @@ test("available browser models detect the selected language and show Korean loca
   assert.equal(h.elements.get("#prepare").hidden, true);
 });
 
-test("downloadable detector and translator each wait for a direct click", async () => {
+test("a delayed translator download falls back to a direct click", async () => {
   const h = harness({ detectorReady: false, translatorReady: false });
   h.translate("Hello world");
   await settle();
@@ -108,9 +112,22 @@ test("downloadable detector and translator each wait for a direct click", async 
   await settle();
   assert.equal(h.elements.get("#prepare").textContent, "번역 모델 준비");
   assert.equal(h.state.translatorCreate, 0);
+  assert.equal(h.state.translatorAttempts, 1);
   h.clickPrepare();
   await settle();
   assert.equal(h.elements.get("#result").textContent, "안녕하세요");
+});
+
+test("detector preparation also attempts the detected translation pair", async () => {
+  const h = harness({ detectorReady: false, translatorReady: false, allowDelayedCreate: true });
+  h.translate("Hello world");
+  await settle();
+  h.clickPrepare();
+  await settle();
+  assert.equal(h.state.detectorCreate, 1);
+  assert.equal(h.state.translatorCreate, 1);
+  assert.equal(h.elements.get("#result").textContent, "안녕하세요");
+  assert.equal(h.elements.get("#prepare").hidden, true);
 });
 
 test("a stale translation cannot replace the current selection", async () => {

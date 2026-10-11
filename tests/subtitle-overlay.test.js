@@ -268,6 +268,8 @@ test("streaming translation applies the saved dictionary to all text layers and 
   assert.equal(h.layer("fill").textContent, "플라흐타과 플라흐타");
   assert.equal(h.layer("outline").textContent, h.layer("fill").textContent);
   port.onMessage.emit({ type: "done", requestId: request.requestId, text: "플라스틱 뚜껑" });
+  port.onMessage.emit({ type: "status", status: { state: "error", code: "prefetch_failed" } });
+  assert.equal(h.layer("fill").textContent, "플라흐타", "a later prefetch failure keeps the visible translation");
   h.chrome.storage.onChanged.emit({ subtitlePostprocessDictionary: { newValue: "플라스틱 뚜껑=새 이름" } }, "local");
   assert.equal(h.layer("fill").textContent, "새 이름", "reprocess raw result rather than old replacement");
   h.message("NYANKAT_SUBTITLE_SET_LANGUAGE", { sourceLanguage: "ko" });
@@ -296,6 +298,33 @@ test("seeks, language changes and unloading reject stale streaming replies", asy
   h.message("NYANKAT_SUBTITLE_UNLOAD");
   assert.equal(secondPort.disconnected, true);
   assert.equal(h.layer("fill"), null);
+});
+
+test("subtitle playback queues the next five cues for translation, including after a seek into a gap", async () => {
+  const h = await harness();
+  const cues = Array.from({ length: 8 }, (_, index) =>
+    `${index + 1}\n00:00:${String(index * 4 + 1).padStart(2, "0")},000 --> 00:00:${String(index * 4 + 3).padStart(2, "0")},000\nLine ${index + 1}`
+  ).join("\n\n");
+  const loaded = h.message("NYANKAT_SUBTITLE_LOAD", {
+    sourceLanguage: "en", filename: "english.srt", encoding: "utf-8", offsetMs: 0,
+    b64: Buffer.from(cues).toString("base64")
+  });
+  assert.equal(loaded.ok, true);
+  const port = h.translationPorts[0];
+  assert.deepEqual(port.messages.find(message => message.type === "prefetch").texts,
+    ["Line 2", "Line 3", "Line 4", "Line 5", "Line 6"]);
+  h.video.currentTime = 3.5;
+  h.video.emit("seeked");
+  assert.equal(h.layer("fill").textContent, "");
+  assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
+    ["Line 2", "Line 3", "Line 4", "Line 5", "Line 6"]);
+  h.video.currentTime = 21.5;
+  h.video.emit("seeked");
+  assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
+    ["Line 7", "Line 8"]);
+  h.message("NYANKAT_SUBTITLE_SET_LANGUAGE", { sourceLanguage: "ko" });
+  assert.equal(h.translationPorts[0].disconnected, true);
+  assert.equal(h.translationPorts.length, 1, "Korean subtitles do not start prefetching");
 });
 
 test("translation host is created in the top frame and is removed for a new session", async () => {

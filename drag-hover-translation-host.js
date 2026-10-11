@@ -13,6 +13,7 @@
   let requestId = 0;
   let pendingAction = null;
   let preparing = false;
+  let prepareTranslatorAfterDetector = false;
   let translationAbort = null;
 
   function send(type, data = {}) {
@@ -74,6 +75,29 @@
   async function getTranslator(language, id) {
     if (translators.has(language)) return translators.get(language);
     const pair = { sourceLanguage: language, targetLanguage: "ko" };
+    if (prepareTranslatorAfterDetector) {
+      prepareTranslatorAfterDetector = false;
+      show("번역 모델도 준비 중…");
+      try {
+        // Try the detected pair immediately after detector preparation. Some
+        // browsers keep the original click activation through this operation.
+        const instance = await Translator.create({ ...pair, monitor });
+        if (!isCurrent(id)) { instance.destroy(); return null; }
+        translators.set(language, instance);
+        return instance;
+      } catch {
+        if (!isCurrent(id)) return null;
+        try {
+          if (await Translator.availability(pair) === "unavailable") {
+            if (isCurrent(id)) show("감지한 언어는 이 브라우저에서 한국어로 번역할 수 없습니다.");
+            return null;
+          }
+        } catch { /* Keep the direct preparation action available. */ }
+        if (!isCurrent(id)) return null;
+        show("번역 모델을 준비하지 못했습니다. 다시 시도해 주세요.", { kind: "translator", language });
+        return null;
+      }
+    }
     const availability = await Translator.availability(pair);
     if (!isCurrent(id)) return null;
     if (availability === "unavailable") throw new Error("감지한 언어는 이 브라우저에서 한국어로 번역할 수 없습니다.");
@@ -154,6 +178,7 @@
       if (action.kind === "detector") {
         detector?.destroy();
         detector = instance;
+        prepareTranslatorAfterDetector = true;
       } else {
         translators.get(action.language)?.destroy();
         translators.set(action.language, instance);
@@ -163,6 +188,7 @@
       void translate(requestId);
     }).catch(() => {
       preparing = false;
+      prepareTranslatorAfterDetector = false;
       show("모델을 준비하지 못했습니다. 브라우저 설정을 확인한 뒤 다시 시도해 주세요.", action);
     });
   });
@@ -176,6 +202,7 @@
       translationAbort?.abort();
       text = "";
       pendingAction = null;
+      prepareTranslatorAfterDetector = false;
       return;
     }
     if (event.data.type !== "translate" || typeof event.data.text !== "string") return;
@@ -186,6 +213,7 @@
     translationAbort?.abort();
     text = incoming;
     pendingAction = null;
+    prepareTranslatorAfterDetector = false;
     void translate(requestId);
   });
 

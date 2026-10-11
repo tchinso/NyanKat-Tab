@@ -150,6 +150,29 @@ select {
   text-align: left;
 }
 
+.settings-transfer {
+  border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  display: grid;
+  gap: 7px;
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
+.settings-transfer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-transfer-actions .link-button {
+  flex: 1;
+  text-align: center;
+}
+
+#settingsTransferStatus {
+  line-height: 1.4;
+  min-height: 16px;
+}
+
 .external-subtitle-search {
   box-sizing: border-box;
   display: block;

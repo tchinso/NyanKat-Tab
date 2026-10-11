@@ -8,6 +8,7 @@
   const sessions = new Map();
   const clients = new Map();
   const jobs = new Map();
+  const prefetches = new Map();
   const port = chrome.runtime.connect({ name: "nyankat-subtitle-translation-host" });
   let dismissed = false;
   let keepAliveTimer = 0;
@@ -92,6 +93,69 @@
     job.controller.abort();
   }
 
+  function hasForeground(language) {
+    return [...jobs.values()].some(job => job.sourceLanguage === language);
+  }
+
+  function cancelPrefetch(clientId) {
+    const batch = prefetches.get(clientId);
+    if (!batch) return;
+    prefetches.delete(clientId);
+    batch.controller?.abort();
+  }
+
+  function pausePrefetches(language) {
+    for (const batch of prefetches.values()) {
+      if (batch.sourceLanguage !== language) continue;
+      batch.paused = true;
+      batch.controller?.abort();
+    }
+  }
+
+  function resumePrefetches(language) {
+    if (hasForeground(language)) return;
+    for (const batch of prefetches.values()) {
+      if (batch.sourceLanguage !== language || batch.waiting) continue;
+      batch.paused = false;
+      void runPrefetch(batch);
+    }
+  }
+
+  async function runPrefetch(batch) {
+    if (closed || batch.running || batch.paused || batch.waiting ||
+      prefetches.get(batch.clientId) !== batch || hasForeground(batch.sourceLanguage)) return;
+    batch.running = true;
+    const controller = new AbortController();
+    batch.controller = controller;
+    const entry = getSession(batch.sourceLanguage);
+    try {
+      // Model creation can be shared with the visible cue. Do not abort that
+      // preparation when playback seeks to a new cue.
+      await entry.session.prepare();
+      while (batch.next < batch.texts.length && !controller.signal.aborted &&
+        prefetches.get(batch.clientId) === batch) {
+        const text = batch.texts[batch.next];
+        if (typeof entry.session.cached !== "function" || entry.session.cached(text) === null) {
+          await entry.session.translateLines(text, { signal: controller.signal });
+        }
+        batch.next += 1;
+      }
+    } catch {
+      if (!controller.signal.aborted && prefetches.get(batch.clientId) === batch) batch.waiting = true;
+    } finally {
+      batch.running = false;
+      batch.controller = null;
+      if (prefetches.get(batch.clientId) === batch && batch.next >= batch.texts.length) {
+        prefetches.delete(batch.clientId);
+      } else if (prefetches.get(batch.clientId) === batch && !batch.paused &&
+        !batch.waiting && !hasForeground(batch.sourceLanguage)) {
+        // A visible cue may finish before the aborted prefetch unwinds.
+        // Restart it now that both the foreground job and abort are settled.
+        void runPrefetch(batch);
+      }
+    }
+  }
+
   async function run(job) {
     if (jobs.get(job.clientId) !== job || job.running) return;
     job.running = true;
@@ -116,6 +180,7 @@
       send({ type: "status", clientId: job.clientId, sourceLanguage: job.sourceLanguage, status: entry.session.status });
     } finally {
       job.running = false;
+      resumePrefetches(job.sourceLanguage);
     }
   }
 
@@ -123,14 +188,21 @@
     for (const job of jobs.values()) {
       if (job.sourceLanguage === language) void run(job);
     }
+    for (const batch of prefetches.values()) {
+      if (batch.sourceLanguage === language) batch.waiting = false;
+    }
+    resumePrefetches(language);
   }
 
   port.onMessage.addListener(message => {
     if (closed) return;
     if (message.type === "release") {
+      const oldLanguage = clients.get(message.clientId);
       cancel(message.clientId);
-      const language = clients.get(message.clientId);
+      cancelPrefetch(message.clientId);
+      const language = oldLanguage;
       clients.delete(message.clientId);
+      if (language) resumePrefetches(language);
       updateKeepAlive();
       if (language && ![...clients.values()].includes(language)) {
         const entry = sessions.get(language);
@@ -142,26 +214,43 @@
       return;
     }
     if (message.type === "cancel") {
+      const language = clients.get(message.clientId);
       cancel(message.clientId, message.requestId);
+      if (language) resumePrefetches(language);
       return;
     }
-    if (!["configure", "translate"].includes(message.type)) return;
+    if (!["configure", "translate", "prefetch"].includes(message.type)) return;
     const language = api.normalizeLanguage(message.sourceLanguage);
     const previous = clients.get(message.clientId);
     if (previous !== language) {
       cancel(message.clientId);
+      cancelPrefetch(message.clientId);
+      if (previous) resumePrefetches(previous);
       dismissed = false;
     }
     clients.set(message.clientId, language);
     updateKeepAlive();
     const entry = getSession(language);
+    if (message.type === "prefetch") {
+      cancelPrefetch(message.clientId);
+      const texts = Array.isArray(message.texts) ? message.texts : [];
+      if (texts.length) {
+        const batch = { clientId: message.clientId, sourceLanguage: language, texts,
+          next: 0, controller: null, running: false, paused: false, waiting: false };
+        prefetches.set(message.clientId, batch);
+        void runPrefetch(batch);
+      }
+      return;
+    }
     if (message.type === "configure") {
       send({ type: "status", clientId: message.clientId, sourceLanguage: language, status: entry.session.status });
       void entry.session.prepare().catch(() => {});
       updateUi();
       return;
     }
+    pausePrefetches(language);
     cancel(message.clientId);
+    cancelPrefetch(message.clientId);
     const job = { ...message, sourceLanguage: language, controller: new AbortController(), running: false };
     jobs.set(message.clientId, job);
     void run(job);
@@ -177,6 +266,8 @@
     updateKeepAlive();
     for (const job of jobs.values()) job.controller.abort();
     jobs.clear();
+    for (const batch of prefetches.values()) batch.controller?.abort();
+    prefetches.clear();
     for (const entry of sessions.values()) entry.session.destroy();
     sessions.clear();
     clients.clear();

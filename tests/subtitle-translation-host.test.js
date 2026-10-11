@@ -205,6 +205,59 @@ test("two videos share a language session and releasing one client preserves the
   assert.deepEqual(h.messages.at(-1), { type: "visibility", visible: false });
 });
 
+test("upcoming cues translate after the visible cue and yield to a new visible request", async () => {
+  const h = harness();
+  h.configure("client");
+  h.translate("client", "visible-1", "Current");
+  h.port.send({ type: "prefetch", clientId: "client", sourceLanguage: "en", texts: ["Next", "Following"] });
+  await settle();
+  const session = h.sessions[0];
+  assert.deepEqual(session.operations.map(operation => operation.text), ["Current"]);
+  session.operations[0].resolve("현재");
+  await settle();
+  assert.deepEqual(session.operations.map(operation => operation.text), ["Current", "Next"]);
+  const oldPrefetch = session.operations[1];
+  h.translate("client", "visible-2", "Seek target");
+  h.port.send({ type: "prefetch", clientId: "client", sourceLanguage: "en", texts: ["After seek"] });
+  assert.equal(oldPrefetch.signal.aborted, true);
+  oldPrefetch.resolve("old prefetch");
+  await settle();
+  assert.deepEqual(session.operations.map(operation => operation.text), ["Current", "Next", "Seek target"]);
+  session.operations[2].resolve("이동한 자막");
+  await settle();
+  assert.deepEqual(session.operations.map(operation => operation.text), ["Current", "Next", "Seek target", "After seek"]);
+  session.operations[3].resolve("다음 자막");
+  await settle();
+  assert.deepEqual(h.results().filter(message => message.type === "done").map(message => message.requestId),
+    ["visible-1", "visible-2"]);
+});
+
+test("an interrupted prefetch resumes after another video's fast visible cue completes", async () => {
+  const h = harness();
+  h.configure("background");
+  h.configure("foreground");
+  h.port.send({ type: "prefetch", clientId: "background", sourceLanguage: "en", texts: ["Ahead one", "Ahead two"] });
+  await settle();
+  const session = h.sessions[0];
+  const interrupted = session.operations[0];
+  assert.equal(interrupted.text, "Ahead one");
+  h.translate("foreground", "visible", "Now visible");
+  await settle();
+  assert.equal(interrupted.signal.aborted, true);
+  session.operations[1].resolve("지금 자막");
+  await settle();
+  assert.equal(session.operations.length, 2, "the old operation has not unwound yet");
+  interrupted.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+  await settle();
+  assert.equal(session.operations[2].text, "Ahead one", "the pending prefetch restarts after abort settles");
+  session.operations[2].resolve("앞 자막 하나");
+  await settle();
+  assert.equal(session.operations[3].text, "Ahead two");
+  session.operations[3].resolve("앞 자막 둘");
+  await settle();
+  assert.deepEqual(h.results().filter(message => message.type === "done").map(message => message.requestId), ["visible"]);
+});
+
 test("cancelling a cue awaiting model download prevents it from starting after preparation", async () => {
   const h = harness({ downloadable: true });
   h.configure("client");

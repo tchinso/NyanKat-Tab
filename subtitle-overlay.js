@@ -10,6 +10,7 @@
   const subtitleStyle = window.NyanKatSubtitleStyle;
   const { DEFAULT_STYLE, normalizeStyle } = subtitleStyle;
   const MAX_OFFSET_MS = 60 * 60 * 1000;
+  const PREFETCH_CUES = 5;
   const recordsById = new Map();
   const recordsByVideo = new WeakMap();
   const observedRoots = new WeakSet();
@@ -562,9 +563,33 @@
     const text = cueIndex === -1 ? "" : record.cues[cueIndex].text;
     setCueText(record, text);
     cancelTranslation(record);
-    if (text.trim() && record.sourceLanguage !== "ko") {
-      requestTranslation(record, text);
+    if (record.sourceLanguage !== "ko") {
+      if (text.trim()) requestTranslation(record, text);
+      prefetchUpcomingCues(record, cueIndex, time);
     }
+  }
+
+  function prefetchUpcomingCues(record, cueIndex, time) {
+    let start = cueIndex + 1;
+    if (cueIndex < 0) {
+      // In a gap, begin with the first cue whose start is still ahead.
+      let low = 0;
+      let high = record.cues.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (record.cues[middle].start <= time) low = middle + 1;
+        else high = middle;
+      }
+      start = low;
+    }
+    const texts = [];
+    for (let index = start; index < record.cues.length && texts.length < PREFETCH_CUES; index += 1) {
+      const text = record.cues[index].text;
+      if (text.trim()) texts.push(text);
+    }
+    const port = connectTranslation(record);
+    if (!port) return;
+    try { port.postMessage({ type: "prefetch", sourceLanguage: record.sourceLanguage, texts }); } catch { disconnectTranslation(record); }
   }
 
   function setCueText(record, text) {
@@ -604,7 +629,7 @@
         if (record.translationPort !== port || !recordsById.has(record.id)) return;
         if (message.type === "status") {
           record.translationStatus = message.status;
-          if (["error", "unavailable"].includes(message.status?.state)) {
+          if (record.translationRequest && ["error", "unavailable"].includes(message.status?.state)) {
             record.rawTranslatedText = null;
             setCueText(record, record.cues[record.currentCueIndex]?.text || "");
           }

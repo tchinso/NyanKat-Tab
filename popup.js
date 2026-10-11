@@ -127,19 +127,27 @@ openLinkPreviewSettingsButton.addEventListener("click", () => {
 });
 
 openDragHoverTranslationSettingsButton.addEventListener("click", () => {
-  getActiveTab().then((tab) => {
-    if (!tab || typeof tab.id !== "number") {
-      setStatus("현재 탭을 찾지 못했습니다");
+  // Pressing "use" is consent to turn translation on, including on tabs
+  // where the compact settings panel cannot be displayed.
+  chrome.storage.sync.set({ enableDragHoverTranslation: true }, () => {
+    if (chrome.runtime.lastError) {
+      setStatus("번역 설정을 저장하지 못했습니다");
       return;
     }
-    chrome.tabs.sendMessage(tab.id, {
-      type: "NYANKAT_DRAG_HOVER_TRANSLATION_OPEN_SETTINGS"
-    }, { frameId: 0 }, (response) => {
-      if (chrome.runtime.lastError || !response?.ok) {
-        setStatus("이 페이지에서는 번역 설정을 열 수 없습니다");
+    getActiveTab().then((tab) => {
+      if (!tab || typeof tab.id !== "number") {
+        setStatus("현재 탭을 찾지 못했습니다");
         return;
       }
-      window.close();
+      chrome.tabs.sendMessage(tab.id, {
+        type: "NYANKAT_DRAG_HOVER_TRANSLATION_OPEN_SETTINGS"
+      }, { frameId: 0 }, (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          setStatus("번역을 켰지만 이 페이지에서는 설정을 열 수 없습니다");
+          return;
+        }
+        window.close();
+      });
     });
   });
 });

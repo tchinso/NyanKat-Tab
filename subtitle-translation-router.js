@@ -9,6 +9,7 @@
   const MAX_CLIENTS_PER_TAB = 64;
   const MAX_CLIENTS = 512;
   const MAX_TEXT_BYTES = 32 * 1024;
+  const MAX_PREFETCH_CUES = 5;
   const MAX_RESULT_BYTES = 128 * 1024;
   const HOST_TIMEOUT_MS = 15000;
   const tabs = new Map();
@@ -124,12 +125,28 @@
       });
       if (!request.forwarded) finishRequest(client, "translation_host_disconnected");
     }
+    if (client.prefetch) {
+      post(entry.host, { type: "prefetch", clientId: client.id,
+        sourceLanguage: client.language, texts: client.prefetch });
+    }
   }
 
   function onClientMessage(tabId, entry, client, message) {
     if (tabs.get(tabId) !== entry || entry.clients.get(client.id) !== client || !message || typeof message !== "object") return;
     if (message.type === "cancel") {
       if (client.request && message.requestId === client.request.requestId) stopRequest(entry, client);
+      return;
+    }
+    if (message.type === "prefetch") {
+      if (!validLanguage(message.sourceLanguage) ||
+        (client.language && client.language !== message.sourceLanguage) ||
+        !Array.isArray(message.texts) || message.texts.length > MAX_PREFETCH_CUES ||
+        message.texts.some(text => !validText(text, MAX_TEXT_BYTES))) return;
+      client.language = message.sourceLanguage;
+      client.prefetch = [...message.texts];
+      if (entry.host) post(entry.host, { type: "prefetch", clientId: client.id,
+        sourceLanguage: client.language, texts: client.prefetch });
+      else ensureHost(tabId, entry);
       return;
     }
     if (message.type !== "translate" && message.type !== "configure") return;
@@ -143,6 +160,7 @@
       return;
     }
     stopRequest(entry, client);
+    if (client.language && client.language !== message.sourceLanguage) client.prefetch = null;
     client.language = message.sourceLanguage;
     if (message.type === "translate") {
       client.request = {
@@ -165,7 +183,7 @@
       entry = { clients: new Map(), host: null, ensureSent: false, needsRestart: true, hostTimer: 0 };
       tabs.set(tabId, entry);
     }
-    const client = { id: "client-" + (++nextClientId), port, language: "", request: null };
+    const client = { id: "client-" + (++nextClientId), port, language: "", request: null, prefetch: null };
     entry.clients.set(client.id, client);
     clientCount += 1;
     port.onMessage.addListener(message => onClientMessage(tabId, entry, client, message));

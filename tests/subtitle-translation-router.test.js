@@ -121,6 +121,22 @@ test("the top frame is asked once and queued requests keep only the newest line 
   assert.equal(h.timers.size, 0, "host registration cancels its timeout");
 });
 
+test("five upcoming cues are validated, bounded, and replayed to a newly connected host", () => {
+  const h = harness();
+  const client = h.client();
+  translate(client, "visible", "en", "Current");
+  client.send({ type: "prefetch", sourceLanguage: "en", texts: ["One", "Two", "Three", "Four", "Five"] });
+  client.send({ type: "prefetch", sourceLanguage: "en", texts: Array(6).fill("extra") });
+  client.send({ type: "prefetch", sourceLanguage: "ja", texts: ["wrong language"] });
+  client.send({ type: "prefetch", sourceLanguage: "en", texts: ["x".repeat(32 * 1024 + 1)] });
+  const host = h.host();
+  assert.deepEqual(host.messages.filter(message => message.type === "prefetch").map(message => message.texts),
+    [["One", "Two", "Three", "Four", "Five"]]);
+  assert.equal(host.messages.find(message => message.type === "translate").text, "Current");
+  client.send({ type: "prefetch", sourceLanguage: "en", texts: ["New next"] });
+  assert.deepEqual(host.messages.filter(message => message.type === "prefetch").at(-1).texts, ["New next"]);
+});
+
 test("streaming responses are isolated by tab, client, and current request", () => {
   const h = harness();
   const first = h.client(7, 0);

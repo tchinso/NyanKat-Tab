@@ -28,6 +28,7 @@
   let frameHeight = 96;
   let token = "";
   let settingsHost = null;
+  let settingsPanel = null;
   let settingsFrame = null;
   let settingsToken = "";
   let pendingText = "";
@@ -76,8 +77,17 @@
   function closeSettings() {
     settingsHost?.remove();
     settingsHost = null;
+    settingsPanel = null;
     settingsFrame = null;
     settingsToken = "";
+  }
+
+  function positionSettings(left, top) {
+    if (!settingsPanel) return;
+    const rect = settingsPanel.getBoundingClientRect();
+    settingsPanel.style.right = "auto";
+    settingsPanel.style.left = Math.max(0, Math.min(left, window.innerWidth - rect.width)) + "px";
+    settingsPanel.style.top = Math.max(0, Math.min(top, window.innerHeight - rect.height)) + "px";
   }
 
   function openSettings() {
@@ -92,12 +102,42 @@
     settingsHost = document.createElement("div");
     settingsHost.style.cssText = "all:initial!important;position:fixed!important;inset:0 auto auto 0!important;width:0!important;height:0!important;overflow:visible!important;z-index:2147483647!important;";
     const shadow = settingsHost.attachShadow({ mode: "closed" });
+    settingsPanel = document.createElement("div");
+    // The compact settings panel leaves the page visible while its handle lets
+    // the user uncover text underneath it without closing the settings.
+    settingsPanel.style.cssText = "position:fixed;top:12px;right:12px;width:min(240px,calc(100vw - 16px));height:min(164px,calc(100vh - 16px));display:flex;flex-direction:column;box-sizing:border-box;border:1px solid #8da5be;border-radius:9px;background:#f4f7fb;box-shadow:0 8px 24px rgba(0,0,0,.28);overflow:hidden;z-index:2147483647;";
+    const dragHandle = document.createElement("div");
+    dragHandle.textContent = "번역 설정 · 드래그하여 이동";
+    dragHandle.title = "드래그하여 설정 창 이동";
+    dragHandle.style.cssText = "flex:0 0 25px;display:flex;align-items:center;padding:0 8px;background:#dce9f7;color:#24476a;font:11px/1.2 system-ui,sans-serif;cursor:grab;user-select:none;touch-action:none;";
+    let drag = null;
+    dragHandle.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      const rect = settingsPanel.getBoundingClientRect();
+      drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
+      positionSettings(rect.left, rect.top);
+      dragHandle.setPointerCapture(event.pointerId);
+      dragHandle.style.cursor = "grabbing";
+      event.preventDefault();
+    });
+    dragHandle.addEventListener("pointermove", event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      positionSettings(drag.left + event.clientX - drag.x, drag.top + event.clientY - drag.y);
+    });
+    const stopDrag = event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      drag = null;
+      dragHandle.style.cursor = "grab";
+    };
+    dragHandle.addEventListener("pointerup", stopDrag);
+    dragHandle.addEventListener("pointercancel", stopDrag);
     settingsFrame = document.createElement("iframe");
     settingsFrame.title = "드래그 후 호버 번역 설정";
     settingsFrame.setAttribute("allow", "language-detector; translator");
-    settingsFrame.style.cssText = "position:fixed;top:12px;right:12px;width:min(440px, calc(100vw - 24px));height:min(560px, calc(100vh - 24px));border:1px solid #8da5be;border-radius:12px;background:#f4f7fb;box-shadow:0 12px 36px rgba(0,0,0,.32);z-index:2147483647;";
+    settingsFrame.style.cssText = "flex:1 1 auto;display:block;width:100%;min-height:0;border:0;background:#f4f7fb;";
     settingsFrame.src = SETTINGS_URL + "#" + settingsToken;
-    shadow.append(settingsFrame);
+    settingsPanel.append(dragHandle, settingsFrame);
+    shadow.append(settingsPanel);
     document.documentElement.append(settingsHost);
     return true;
   }
@@ -267,7 +307,13 @@
 
     window.addEventListener("scroll", hide, { capture: true, signal });
     document.addEventListener("visibilitychange", () => { if (document.hidden) hide(); }, { signal });
-    window.addEventListener("resize", () => { if (visible) positionFrame(); }, { signal });
+    window.addEventListener("resize", () => {
+      if (visible) positionFrame();
+      if (settingsPanel && settingsPanel.style.left) {
+        const rect = settingsPanel.getBoundingClientRect();
+        positionSettings(rect.left, rect.top);
+      }
+    }, { signal });
 
     window.addEventListener("message", event => {
       if (settingsFrame && event.source === settingsFrame.contentWindow && event.origin === HOST_ORIGIN &&

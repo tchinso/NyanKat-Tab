@@ -19,13 +19,8 @@
       </label>
       <p id="settingStatus" class="status" aria-live="polite"></p>
       <section>
-        <h2>언어 감지 모델</h2>
-        <p>첫 사용 시 브라우저가 모델을 다운로드합니다.</p>
-        <p id="detectorStatus" class="status" aria-live="polite">상태 확인 중…</p>
-        <button id="prepareDetector" type="button" disabled>언어 감지 모델 준비</button>
-      </section>
-      <section>
-        <h2>한국어 번역 모델</h2>
+        <h2>모델 준비</h2>
+        <p>첫 사용 시 브라우저가 언어 감지 모델과 선택한 언어의 한국어 번역 모델을 다운로드합니다.</p>
         <label for="language">원문 언어</label>
         <select id="language">
           <option value="en">영어</option>
@@ -38,8 +33,9 @@
           <option value="ru">러시아어</option>
           <option value="pt">포르투갈어</option>
         </select>
-        <p id="translatorStatus" class="status" aria-live="polite">상태 확인 중…</p>
-        <button id="prepareTranslator" type="button" disabled>선택한 언어의 번역 모델 준비</button>
+        <button id="prepareModels" type="button" disabled>언어 감지·번역 모델 함께 준비</button>
+        <p id="detectorStatus" class="status" aria-live="polite">언어 감지: 상태 확인 중…</p>
+        <p id="translatorStatus" class="status" aria-live="polite">번역: 상태 확인 중…</p>
         <p class="hint">다른 언어의 모델이 필요하면 언어를 바꿔 준비하세요. 웹페이지의 번역 툴팁에서도 감지한 언어의 모델을 준비할 수 있습니다.</p>
       </section>
     </main>

@@ -58,6 +58,17 @@
           <input id="sendZeroOnYouTube" type="checkbox">
         </label>
 
+        <div class="settings-transfer">
+          <h2>설정 백업</h2>
+          <p>설정을 JSON 파일로 옮깁니다. PC에 설치된 자막 글꼴은 파일에 포함되지 않습니다.</p>
+          <div class="settings-transfer-actions">
+            <button id="exportSettings" class="link-button" type="button">설정 내보내기</button>
+            <button id="importSettings" class="link-button" type="button">설정 불러오기</button>
+          </div>
+          <input id="settingsImportFile" type="file" accept=".json,application/json" hidden>
+          <p id="settingsTransferStatus" role="status" aria-live="polite"></p>
+        </div>
+
         <footer id="status" aria-live="polite">저장됨</footer>
       </section>
 
@@ -330,5 +341,7 @@
     <script src="subtitle-extractor.js"></script>
     <script src="subtitle-popup.js"></script>
     <script src="download-popup.js"></script>
+    <script src="floating-scroll-sites.js"></script>
+    <script src="settings-transfer.js"></script>
   </body>
 </html>
