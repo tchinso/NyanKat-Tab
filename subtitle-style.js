@@ -58,7 +58,8 @@
   };
   const COLOR_KEYS = ["color", "gradientColor1", "gradientColor2", "outlineColor",
     "outlineColor2", "bgColor", "bgBorderColor", "shadowColor"];
-  const BOOLEAN_KEYS = ["useGradient", "textShadow", "visible"];
+  const BOOLEAN_KEYS = ["useGradient", "textShadow"];
+  const MAX_PRESETS = 20;
   const ENUMS = { outline: ["none", "line", "double", "neon"],
     background: ["none", "rectangle", "box", "pill"] };
 
@@ -81,10 +82,32 @@
     for (const key of BOOLEAN_KEYS) {
       result[key] = typeof source[key] === "boolean" ? source[key] : base[key];
     }
+    // The visibility toggle was removed. Older saved styles must display subtitles.
+    result.visible = true;
     for (const [key, values] of Object.entries(ENUMS)) {
       result[key] = values.includes(source[key]) ? source[key] : base[key];
     }
     return result;
+  }
+
+  function normalizePresets(value) {
+    if (!Array.isArray(value)) return [];
+    const presets = [];
+    const ids = new Set();
+    for (const entry of value) {
+      if (presets.length >= MAX_PRESETS) break;
+      if (!entry || typeof entry !== "object" ||
+          typeof entry.id !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(entry.id) ||
+          ids.has(entry.id) || typeof entry.name !== "string" || !entry.name.trim() ||
+          !entry.style || typeof entry.style !== "object" || Array.isArray(entry.style)) continue;
+      ids.add(entry.id);
+      presets.push({
+        id: entry.id,
+        name: entry.name.trim().slice(0, 40),
+        style: normalizeStyle(entry.style)
+      });
+    }
+    return presets;
   }
 
   function fontValue(family) {
@@ -134,5 +157,7 @@
     return loads.get(entry.family);
   }
 
-  window.NyanKatSubtitleStyle = { DEFAULT_STYLE, FONT_GROUPS, normalizeStyle, fontValue, ensureFont };
+  window.NyanKatSubtitleStyle = {
+    DEFAULT_STYLE, FONT_GROUPS, MAX_PRESETS, normalizeStyle, normalizePresets, fontValue, ensureFont
+  };
 })();

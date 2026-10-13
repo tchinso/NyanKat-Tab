@@ -197,7 +197,7 @@ test("style changes remove stale effects and subtitle gaps hide the background b
   h.video.emit("seeked");
   assert.equal(h.layer("text").hidden, false);
   h.message("NYANKAT_SUBTITLE_UPDATE_STYLE", { settings: { visible: false } });
-  assert.equal(h.layer("overlay").hidden, true);
+  assert.equal(h.layer("overlay").hidden, false, "legacy visibility settings cannot hide the subtitle");
   h.message("NYANKAT_SUBTITLE_UPDATE_STYLE", { settings: { visible: true, outline: "neon" } });
   assert.equal(h.layer("overlay").hidden, false);
   assert.equal(h.layer("outline").hidden, false);
@@ -338,6 +338,11 @@ test("subtitle playback queues the next five cues for translation, including aft
   assert.equal(h.layer("fill").textContent, "");
   assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
     ["Line 2", "Line 3", "Line 4", "Line 5", "Line 6"]);
+  h.video.currentTime = 7.5;
+  h.video.emit("seeked");
+  assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
+    ["Line 3", "Line 4", "Line 5", "Line 6", "Line 7"],
+    "seeking from one gap to another refreshes the next five without changing the displayed cue");
   h.video.currentTime = 21.5;
   h.video.emit("seeked");
   assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
@@ -345,6 +350,46 @@ test("subtitle playback queues the next five cues for translation, including aft
   h.message("NYANKAT_SUBTITLE_SET_LANGUAGE", { sourceLanguage: "ko" });
   assert.equal(h.translationPorts[0].disconnected, true);
   assert.equal(h.translationPorts.length, 1, "Korean subtitles do not start prefetching");
+});
+
+test("the five future cues advance while an overlapping long cue remains visible", async () => {
+  const h = await harness();
+  const cues = Array.from({ length: 8 }, (_, index) =>
+    `${index + 1}\n00:00:${String(index * 2 + 1).padStart(2, "0")},000 --> 00:00:${String(index === 0 ? 20 : index * 2 + 2).padStart(2, "0")},000\nLine ${index + 1}`
+  ).join("\n\n");
+  h.message("NYANKAT_SUBTITLE_LOAD", {
+    sourceLanguage: "en", filename: "overlap.srt", encoding: "utf-8", offsetMs: 0,
+    b64: Buffer.from(cues).toString("base64")
+  });
+  const port = h.translationPorts[0];
+  assert.equal(port.messages.find(message => message.type === "translate").text, "Line 1");
+  assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
+    ["Line 2", "Line 3", "Line 4", "Line 5", "Line 6"]);
+  h.video.currentTime = 4.5;
+  h.video.emit("timeupdate");
+  assert.equal(h.layer("fill").textContent, "Line 1");
+  assert.equal(port.messages.filter(message => message.type === "translate").length, 1);
+  assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
+    ["Line 3", "Line 4", "Line 5", "Line 6", "Line 7"]);
+});
+
+test("loading a new subtitle file resets the five-cue translation window", async () => {
+  const h = await harness();
+  const makeCues = prefix => Array.from({ length: 7 }, (_, index) =>
+    `${index + 1}\n00:00:${String(index * 3 + 1).padStart(2, "0")},000 --> 00:00:${String(index * 3 + 3).padStart(2, "0")},000\n${prefix} ${index + 1}`
+  ).join("\n\n");
+  const load = prefix => h.message("NYANKAT_SUBTITLE_LOAD", {
+    sourceLanguage: "en", filename: `${prefix}.srt`, encoding: "utf-8", offsetMs: 0,
+    b64: Buffer.from(makeCues(prefix)).toString("base64")
+  });
+  assert.equal(load("Old").ok, true);
+  const oldPort = h.translationPorts[0];
+  assert.equal(load("New").ok, true);
+  assert.equal(oldPort.disconnected, true);
+  const newPort = h.translationPorts.at(-1);
+  assert.equal(newPort.messages.find(message => message.type === "translate").text, "New 1");
+  assert.deepEqual(newPort.messages.find(message => message.type === "prefetch").texts,
+    ["New 2", "New 3", "New 4", "New 5", "New 6"]);
 });
 
 test("translation host is created in the top frame and is removed for a new session", async () => {

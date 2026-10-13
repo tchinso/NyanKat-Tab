@@ -123,6 +123,12 @@
     const normalized = window.NyanKatSubtitleStyle.normalizeStyle(input);
     for (const key of Object.keys(DEFAULT_STYLE)) {
       if (!own(input, key)) continue;
+      if (key === "visible") {
+        // Backups made before the visibility checkbox was removed may contain false.
+        if (typeof input.visible !== "boolean") invalid("자막 visible");
+        result.visible = true;
+        continue;
+      }
       if (key === "font" && !PORTABLE_FONTS.has(input.font)) invalid("자막 글꼴");
       if (typeof input[key] !== typeof DEFAULT_STYLE[key] || input[key] !== normalized[key]) invalid("자막 " + key);
       result[key] = normalized[key];
@@ -130,10 +136,35 @@
     return result;
   }
 
+  function readPresets(input) {
+    if (!Array.isArray(input) || input.length > window.NyanKatSubtitleStyle.MAX_PRESETS) invalid("자막 스타일 목록");
+    const ids = new Set();
+    const names = new Set();
+    return input.map(preset => {
+      if (!record(preset) || typeof preset.id !== "string" ||
+          !/^[a-zA-Z0-9_-]{1,64}$/.test(preset.id) || ids.has(preset.id) ||
+          typeof preset.name !== "string" || preset.name !== preset.name.trim() ||
+          !preset.name || preset.name.length > 40 ||
+          names.has(preset.name.toLocaleLowerCase())) invalid("자막 스타일 목록");
+      ids.add(preset.id);
+      names.add(preset.name.toLocaleLowerCase());
+      return { id: preset.id, name: preset.name, style: readStyle(preset.style) };
+    });
+  }
+
   function readLocal(input) {
     if (!record(input)) invalid("자막 설정");
     const result = {};
     if (own(input, "subtitleStyle")) result.subtitleStyle = readStyle(input.subtitleStyle);
+    if (own(input, "subtitleStylePresets")) result.subtitleStylePresets = readPresets(input.subtitleStylePresets);
+    if (own(input, "subtitleStylePresetId")) {
+      if (typeof input.subtitleStylePresetId !== "string" ||
+          !own(result, "subtitleStylePresets") ||
+          (input.subtitleStylePresetId && !result.subtitleStylePresets.some(preset => preset.id === input.subtitleStylePresetId))) {
+        invalid("선택한 자막 스타일");
+      }
+      result.subtitleStylePresetId = input.subtitleStylePresetId;
+    }
     if (own(input, "subtitlePostprocessDictionary")) {
       const dictionary = input.subtitlePostprocessDictionary;
       if (typeof dictionary !== "string" || dictionary.length > window.NyanKatSubtitlePostprocess.MAX_DICTIONARY_CHARS ||
@@ -161,7 +192,10 @@
   async function buildExport() {
     const [storedSync, storedLocal] = await Promise.all([
       chrome.storage.sync.get(DEFAULT_SYNC),
-      chrome.storage.local.get(["subtitleStyle", "subtitleFont", "subtitlePostprocessDictionary"])
+      chrome.storage.local.get([
+        "subtitleStyle", "subtitleFont", "subtitlePostprocessDictionary",
+        "subtitleStylePresets", "subtitleStylePresetId"
+      ])
     ]);
     const sync = readSync({ ...DEFAULT_SYNC, ...storedSync });
     const fallbackFont = typeof storedLocal.subtitleFont === "string" && storedLocal.subtitleFont.trim()
@@ -170,8 +204,18 @@
       storedLocal.subtitleStyle, { ...DEFAULT_STYLE, font: fallbackFont }
     );
     if (!PORTABLE_FONTS.has(style.font)) delete style.font;
+    const presets = window.NyanKatSubtitleStyle.normalizePresets(storedLocal.subtitleStylePresets)
+      .map(preset => {
+        const portableStyle = { ...preset.style };
+        if (!PORTABLE_FONTS.has(portableStyle.font)) delete portableStyle.font;
+        return { id: preset.id, name: preset.name, style: portableStyle };
+      });
+    const selectedPresetId = presets.some(preset => preset.id === storedLocal.subtitleStylePresetId)
+      ? storedLocal.subtitleStylePresetId : "";
     const local = readLocal({
       subtitleStyle: style,
+      subtitleStylePresets: presets,
+      subtitleStylePresetId: selectedPresetId,
       subtitlePostprocessDictionary: storedLocal.subtitlePostprocessDictionary ?? ""
     });
     return {
@@ -185,18 +229,40 @@
 
   async function applyImport(settings) {
     const localWrite = {};
-    if (own(settings.local, "subtitleStyle")) {
+    let receivingFont = DEFAULT_STYLE.font;
+    let currentStyle;
+    if (own(settings.local, "subtitleStyle") || own(settings.local, "subtitleStylePresets")) {
       const current = await chrome.storage.local.get(["subtitleStyle", "subtitleFont"]);
-      const currentFont = typeof current.subtitleStyle?.font === "string" && current.subtitleStyle.font.trim()
+      currentStyle = current.subtitleStyle;
+      receivingFont = typeof current.subtitleStyle?.font === "string" && current.subtitleStyle.font.trim()
         ? current.subtitleStyle.font
         : typeof current.subtitleFont === "string" && current.subtitleFont.trim()
           ? current.subtitleFont : DEFAULT_STYLE.font;
-      const previous = window.NyanKatSubtitleStyle.normalizeStyle(current.subtitleStyle, {
-        ...DEFAULT_STYLE, font: currentFont
+    }
+    if (own(settings.local, "subtitleStyle")) {
+      const previous = window.NyanKatSubtitleStyle.normalizeStyle(currentStyle, {
+        ...DEFAULT_STYLE, font: receivingFont
       });
       const next = window.NyanKatSubtitleStyle.normalizeStyle(settings.local.subtitleStyle, previous);
       localWrite.subtitleStyle = next;
       localWrite.subtitleFont = next.font;
+      localWrite.subtitleStylePresetId = "";
+    }
+    if (own(settings.local, "subtitleStylePresets")) {
+      localWrite.subtitleStylePresets = settings.local.subtitleStylePresets.map(preset => ({
+        id: preset.id,
+        name: preset.name,
+        style: window.NyanKatSubtitleStyle.normalizeStyle(preset.style, {
+          ...DEFAULT_STYLE, font: receivingFont
+        })
+      }));
+      localWrite.subtitleStylePresetId = settings.local.subtitleStylePresetId || "";
+      if (!own(settings.local, "subtitleStyle") && localWrite.subtitleStylePresetId) {
+        const selected = localWrite.subtitleStylePresets.find(preset =>
+          preset.id === localWrite.subtitleStylePresetId);
+        localWrite.subtitleStyle = { ...selected.style };
+        localWrite.subtitleFont = selected.style.font;
+      }
     }
     if (own(settings.local, "subtitlePostprocessDictionary")) {
       localWrite.subtitlePostprocessDictionary = settings.local.subtitlePostprocessDictionary;

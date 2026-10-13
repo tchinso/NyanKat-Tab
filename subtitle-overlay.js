@@ -137,6 +137,7 @@
       cues: [],
       cueEndPrefixes: [],
       currentCueIndex: -1,
+      prefetchStartIndex: -1,
       offsetMs: 0,
       settings: { ...savedStyle },
       styleTouched: false,
@@ -553,34 +554,40 @@
 
     const time = (Number(record.video.currentTime) || 0) - record.offsetMs / 1000;
     const cueIndex = findCueIndex(record.cues, record.cueEndPrefixes, time);
-    if (cueIndex === record.currentCueIndex) {
+    const prefetchStart = Math.max(cueIndex + 1, firstCueAfter(record.cues, time));
+    const cueChanged = cueIndex !== record.currentCueIndex;
+    if (!cueChanged && (record.sourceLanguage === "ko" ||
+      (prefetchStart === record.prefetchStartIndex && record.translationPort))) {
       return;
     }
 
-    record.currentCueIndex = cueIndex;
-    record.rawTranslatedText = null;
     const text = cueIndex === -1 ? "" : record.cues[cueIndex].text;
-    setCueText(record, text);
-    cancelTranslation(record);
+    if (cueChanged) {
+      record.currentCueIndex = cueIndex;
+      record.rawTranslatedText = null;
+      setCueText(record, text);
+      cancelTranslation(record);
+    }
     if (record.sourceLanguage !== "ko") {
-      if (text.trim()) requestTranslation(record, text);
-      prefetchUpcomingCues(record, cueIndex, time);
+      if (text.trim() && (cueChanged || !record.translationPort)) requestTranslation(record, text);
+      if (prefetchStart !== record.prefetchStartIndex || !record.translationPort) {
+        prefetchUpcomingCues(record, prefetchStart);
+      }
     }
   }
 
-  function prefetchUpcomingCues(record, cueIndex, time) {
-    let start = cueIndex + 1;
-    if (cueIndex < 0) {
-      // In a gap, begin with the first cue whose start is still ahead.
-      let low = 0;
-      let high = record.cues.length;
-      while (low < high) {
-        const middle = (low + high) >> 1;
-        if (record.cues[middle].start <= time) low = middle + 1;
-        else high = middle;
-      }
-      start = low;
+  function firstCueAfter(cues, time) {
+    let low = 0;
+    let high = cues.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (cues[middle].start <= time) low = middle + 1;
+      else high = middle;
     }
+    return low;
+  }
+
+  function prefetchUpcomingCues(record, start) {
     const texts = [];
     for (let index = start; index < record.cues.length && texts.length < PREFETCH_CUES; index += 1) {
       const text = record.cues[index].text;
@@ -588,7 +595,10 @@
     }
     const port = connectTranslation(record);
     if (!port) return;
-    try { port.postMessage({ type: "prefetch", sourceLanguage: record.sourceLanguage, texts }); } catch { disconnectTranslation(record); }
+    try {
+      port.postMessage({ type: "prefetch", sourceLanguage: record.sourceLanguage, texts });
+      record.prefetchStartIndex = start;
+    } catch { disconnectTranslation(record); }
   }
 
   function setCueText(record, text) {
@@ -616,6 +626,7 @@
     cancelTranslation(record);
     const port = record.translationPort;
     record.translationPort = null;
+    record.prefetchStartIndex = -1;
     port?.disconnect();
   }
 
@@ -646,6 +657,7 @@
       port.onDisconnect.addListener(() => {
         if (record.translationPort !== port) return;
         record.translationPort = null;
+        record.prefetchStartIndex = -1;
         record.translationRequest = "";
         record.translationStatus = { state: "error", code: "translation_host_disconnected" };
       });

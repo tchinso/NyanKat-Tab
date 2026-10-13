@@ -185,7 +185,7 @@ async function harness(options = {}) {
 const controlIds = {
   font: "subtitleFont", fontSize: "subtitleFontSize", verticalPosition: "subtitleVerticalPosition",
   color: "subtitleColor", bgColor: "subtitleBackgroundColor", bgOpacity: "subtitleBackgroundOpacity",
-  textShadow: "subtitleTextShadow", visible: "subtitleVisible", letterSpacing: "subtitleLetterSpacing", lineHeight: "subtitleLineHeight",
+  textShadow: "subtitleTextShadow", letterSpacing: "subtitleLetterSpacing", lineHeight: "subtitleLineHeight",
   useGradient: "subtitleUseGradient", gradientColor1: "subtitleGradientColor1", gradientColor2: "subtitleGradientColor2", gradientAngle: "subtitleGradientAngle",
   outline: "subtitleOutline", outlineColor: "subtitleOutlineColor", outlineWidth: "subtitleOutlineWidth", outlineColor2: "subtitleOutlineColor2", outlineWidth2: "subtitleOutlineWidth2",
   background: "subtitleBackground", bgBorderColor: "subtitleBackgroundBorderColor", bgPadding: "subtitleBackgroundPadding", bgBorderWidth: "subtitleBackgroundBorderWidth",
@@ -195,7 +195,7 @@ const controlIds = {
 const customStyle = {
   font: '"Custom PC Font"', fontSize: 63, verticalPosition: 44,
   color: "#112233", bgColor: "#445566", bgOpacity: 0.37,
-  textShadow: false, visible: false, letterSpacing: 2.4, lineHeight: 1.7,
+  textShadow: false, visible: true, letterSpacing: 2.4, lineHeight: 1.7,
   useGradient: true, gradientColor1: "#778899", gradientColor2: "#aabbcc", gradientAngle: 135,
   outline: "double", outlineColor: "#123456", outlineWidth: 3,
   outlineColor2: "#654321", outlineWidth2: 6, background: "pill",
@@ -214,6 +214,82 @@ function assertControls(h, settings) {
     }
   }
 }
+
+async function savePreset(h, name) {
+  h.element("saveSubtitleStylePreset").dispatchEvent({ type: "click" });
+  await settle();
+  h.element("subtitleStylePresetName").value = name;
+  h.element("subtitleStylePresetForm").dispatchEvent({ type: "submit", preventDefault() {} });
+  await settle();
+}
+
+test("preset controls occupy the requested positions and the visibility checkbox is absent", () => {
+  const heading = popupHTML.indexOf("모든 스타일은 자동으로 저장되어 다음 자막에도 적용됩니다.");
+  const presetSelect = popupHTML.indexOf('id="subtitleStylePreset"');
+  const firstStyleGroup = popupHTML.indexOf('class="subtitle-style-group"');
+  const saveButton = popupHTML.indexOf('id="saveSubtitleStylePreset"');
+  const status = popupHTML.indexOf('id="subtitleStatus"');
+  assert.ok(heading < presetSelect && presetSelect < firstStyleGroup);
+  assert.ok(saveButton < status);
+  assert.doesNotMatch(popupHTML, /id="subtitleVisible"/);
+});
+
+test("styles can be saved, switched, edited, deleted, and restored after reopening", async () => {
+  const saved = {};
+  const h = await harness({ saved });
+  h.edit("subtitleFontSize", 61);
+  await savePreset(h, "영화");
+  const movieId = h.element("subtitleStylePreset").value;
+  assert.equal(saved.subtitleStylePresets[0].name, "영화");
+  assert.equal(saved.subtitleStylePresetId, movieId);
+  h.edit("subtitleFontSize", 72);
+  assert.equal(saved.subtitleStylePresets[0].style.fontSize, 72);
+  await savePreset(h, "강의");
+  const lectureId = h.element("subtitleStylePreset").value;
+  h.edit("subtitleFontSize", 38);
+  h.edit("subtitleStylePreset", movieId, "change");
+  assert.equal(h.element("subtitleFontSize").value, "72");
+  assert.equal(saved.subtitleStylePresetId, movieId);
+  h.edit("subtitleFontSize", 75);
+  h.edit("subtitleStylePreset", lectureId, "change");
+  assert.equal(h.element("subtitleFontSize").value, "38");
+  h.element("deleteSubtitleStylePreset").dispatchEvent({ type: "click" });
+  assert.equal(h.element("subtitleStylePreset").value, "");
+  assert.equal(saved.subtitleStylePresets.length, 1);
+  assert.equal(saved.subtitleStylePresets[0].name, "영화");
+  assert.equal(saved.subtitleStyle.fontSize, 38, "deleting a preset leaves the visible style in use");
+  h.close();
+  const reopened = await harness({ saved });
+  assert.equal(reopened.element("subtitleStylePreset").options.length, 2);
+  assert.equal(reopened.element("subtitleFontSize").value, "38");
+  reopened.edit("subtitleStylePreset", movieId, "change");
+  assert.equal(reopened.element("subtitleFontSize").value, "75");
+  reopened.close();
+});
+
+test("at most twenty style presets can be saved", async () => {
+  const h = await harness();
+  for (let number = 1; number <= 20; number += 1) {
+    await savePreset(h, "스타일 " + number);
+  }
+  assert.equal(h.saved.subtitleStylePresets.length, 20);
+  assert.equal(h.element("subtitleStylePreset").options.length, 21);
+  assert.equal(h.element("saveSubtitleStylePreset").disabled, true);
+  await savePreset(h, "추가 스타일");
+  assert.equal(h.saved.subtitleStylePresets.length, 20);
+  h.close();
+});
+
+test("a legacy hidden style is shown and cannot be hidden by the removed control", async () => {
+  const h = await harness({ saved: { subtitleStyle: { ...customStyle, visible: false } }, video: true });
+  await h.refresh();
+  const update = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_UPDATE_STYLE");
+  assert.equal(update.message.payload.settings.visible, true);
+  h.edit("subtitleFontSize", 64);
+  assert.equal(h.saved.subtitleStyle.visible, true);
+  assert.equal(h.document.querySelector("#subtitleVisible"), null);
+  h.close();
+});
 
 test("all saved display options restore when no video is present", async () => {
   const h = await harness({ saved: { subtitleStyle: customStyle } });

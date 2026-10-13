@@ -78,6 +78,8 @@ test("export includes all persistent settings and omits a PC-installed subtitle 
   assert.equal(exported.local.subtitleStyle.fontSize, 62);
   assert.equal(exported.local.subtitlePostprocessDictionary, "hello=안녕하세요");
   assert.equal(exported.local.subtitleFont, undefined);
+  assert.deepEqual(exported.local.subtitleStylePresets, []);
+  assert.equal(exported.local.subtitleStylePresetId, "");
   assert.deepEqual(plain(h.transfer.parseImport(JSON.stringify(exported))).sync, exported.sync);
 });
 
@@ -113,6 +115,56 @@ test("bundled subtitle fonts can travel with a settings file", async () => {
   assert.equal(destination.local.subtitleFont, bundled);
 });
 
+test("twenty named subtitle styles transfer and PC fonts remain local to each computer", async () => {
+  const presets = Array.from({ length: 20 }, (_, index) => ({
+    id: "preset-" + (index + 1), name: "스타일 " + (index + 1),
+    style: { ...harnessStyle(), font: '"Source PC Font"', fontSize: 20 + index }
+  }));
+  const source = harness({}, {
+    subtitleStyle: { ...harnessStyle(), font: '"Source PC Font"' },
+    subtitleStylePresets: presets, subtitleStylePresetId: "preset-20"
+  });
+  const file = plain(await source.transfer.buildExport());
+  assert.equal(file.local.subtitleStylePresets.length, 20);
+  assert.equal(file.local.subtitleStylePresets[0].style.font, undefined);
+  const destination = harness({}, {
+    subtitleStyle: { ...harnessStyle(), font: '"Destination PC Font"' }
+  });
+  await destination.transfer.applyImport(destination.transfer.parseImport(JSON.stringify(file)));
+  assert.equal(destination.local.subtitleStylePresets.length, 20);
+  assert.equal(destination.local.subtitleStylePresets[0].style.font, '"Destination PC Font"');
+  assert.equal(destination.local.subtitleStylePresets[19].style.fontSize, 39);
+  assert.equal(destination.local.subtitleStylePresetId, "preset-20");
+});
+
+test("importing a selected preset alone also applies it as the current style", async () => {
+  const destination = harness({}, {
+    subtitleStyle: { ...harnessStyle(), font: '"Destination PC Font"', fontSize: 28 }
+  });
+  const file = { format: "nyankatx3-tab-settings", schemaVersion: 1, sync: {}, local: {
+    subtitleStylePresets: [{ id: "preset-1", name: "영화", style: { fontSize: 67 } }],
+    subtitleStylePresetId: "preset-1"
+  } };
+  await destination.transfer.applyImport(destination.transfer.parseImport(JSON.stringify(file)));
+  assert.equal(destination.local.subtitleStylePresetId, "preset-1");
+  assert.equal(destination.local.subtitleStyle.fontSize, 67);
+  assert.equal(destination.local.subtitleStyle.font, '"Destination PC Font"');
+  assert.equal(destination.local.subtitleFont, '"Destination PC Font"');
+});
+
+test("old backup styles with visibility disabled migrate to shown subtitles", async () => {
+  const h = harness({}, {
+    subtitleStylePresets: [{ id: "preset-1", name: "기존", style: harnessStyle() }],
+    subtitleStylePresetId: "preset-1"
+  });
+  const file = { format: "nyankatx3-tab-settings", schemaVersion: 1,
+    sync: {}, local: { subtitleStyle: { fontSize: 55, visible: false } } };
+  await h.transfer.applyImport(h.transfer.parseImport(JSON.stringify(file)));
+  assert.equal(h.local.subtitleStyle.visible, true);
+  assert.equal(h.local.subtitleStylePresetId, "", "an imported working style is detached from older presets");
+  assert.equal(h.local.subtitleStylePresets.length, 1);
+});
+
 test("malformed files and unsupported values are rejected before storage changes", async () => {
   const h = harness();
   assert.throws(() => h.transfer.parseImport("{oops"), /JSON/);
@@ -124,6 +176,10 @@ test("malformed files and unsupported values are rejected before storage changes
   assert.throws(() => h.transfer.parseImport(JSON.stringify(document)), /자막 글꼴/);
   document.local = { subtitlePostprocessDictionary: "invalid rule" };
   assert.throws(() => h.transfer.parseImport(JSON.stringify(document)), /후처리 사전/);
+  document.local = { subtitleStylePresets: Array.from({ length: 21 }, (_, index) => ({
+    id: "preset-" + index, name: "스타일 " + index, style: {}
+  })) };
+  assert.throws(() => h.transfer.parseImport(JSON.stringify(document)), /스타일 목록/);
   assert.equal(h.writes.length, 0);
 });
 

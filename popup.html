@@ -153,6 +153,12 @@
           <h3>표시 스타일</h3>
           <p>모든 스타일은 자동으로 저장되어 다음 자막에도 적용됩니다.</p>
         </div>
+        <div class="subtitle-row subtitle-preset-row">
+          <label for="subtitleStylePreset">스타일 선택</label>
+          <select id="subtitleStylePreset" aria-label="저장된 자막 스타일">
+            <option value="">현재 스타일</option>
+          </select>
+        </div>
         <fieldset class="subtitle-style-group">
           <legend>글꼴과 간격</legend>
           <div class="subtitle-row style-select">
@@ -313,10 +319,23 @@
             </div>
           </div>
         </fieldset>
-        <label class="subtitle-checkbox" for="subtitleVisible">
-          <input id="subtitleVisible" type="checkbox" checked>
-          <span>자막 보이기</span>
-        </label>
+        <div class="subtitle-actions subtitle-preset-actions">
+          <button id="saveSubtitleStylePreset" type="button">스타일 저장</button>
+          <button id="deleteSubtitleStylePreset" type="button" disabled>스타일 삭제</button>
+        </div>
+
+        <dialog id="subtitleStylePresetDialog" aria-labelledby="subtitleStylePresetTitle">
+          <form id="subtitleStylePresetForm">
+            <h2 id="subtitleStylePresetTitle">현재 스타일 저장</h2>
+            <label for="subtitleStylePresetName">스타일 이름</label>
+            <input id="subtitleStylePresetName" type="text" maxlength="40" required>
+            <p id="subtitleStylePresetError" class="subtitle-hint" role="alert"></p>
+            <div class="subtitle-actions">
+              <button id="confirmSubtitleStylePreset" class="primary-button" type="submit">저장</button>
+              <button id="cancelSubtitleStylePreset" type="button">취소</button>
+            </div>
+          </form>
+        </dialog>
 
         <p id="subtitleStatus" class="subtitle-status" aria-live="polite">동영상을 다시 검색해 선택하세요.</p>
       </section>
@@ -336,11 +355,7 @@
 
     <script src="popup.js"></script>
     <script src="subtitle-style.js"></script>
-    <script src="subtitle-translation.js"></script>
     <script src="subtitle-postprocess.js"></script>
-    <script src="subtitle-extractor.js"></script>
-    <script src="subtitle-popup.js"></script>
-    <script src="download-popup.js"></script>
     <script src="floating-scroll-sites.js"></script>
     <script src="settings-transfer.js"></script>
   </body>

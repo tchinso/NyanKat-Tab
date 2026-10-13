@@ -51,6 +51,8 @@ function harness(options = {}) {
     createSession(settings) {
       const language = settings.sourceLanguage;
       let ready = options.downloadable !== true && !(options.downloadable || []).includes?.(language);
+      const cache = new Map();
+      let queue = Promise.resolve();
       const session = {
         language, prepareCalls: [], operations: [], downloads: [], destroyCalls: 0, destroyed: false,
         status: { state: "idle", sourceLanguage: language, targetLanguage: "ko", progress: null, message: "" },
@@ -79,10 +81,22 @@ function harness(options = {}) {
           return Promise.reject(Object.assign(new Error("download-required"), { code: "download-required" }));
         },
         translateLines(text, config) {
-          const result = deferred();
-          this.operations.push({ text, signal: config.signal, update: config.onUpdate, resolve: result.resolve, reject: result.reject });
-          return result.promise;
+          const start = () => {
+            if (options.serialized && cache.has(text)) return Promise.resolve(cache.get(text));
+            const result = deferred();
+            this.operations.push({ text, signal: config.signal, update: config.onUpdate,
+              resolve(value) {
+                if (!config.signal.aborted) cache.set(text, value);
+                result.resolve(value);
+              }, reject: result.reject });
+            return result.promise;
+          };
+          if (!options.serialized) return start();
+          const result = queue.then(start);
+          queue = result.catch(() => {});
+          return result;
         },
+        ...(options.cacheAware ? { cached(text) { return cache.has(text) ? cache.get(text) : null; } } : {}),
         destroy() { this.destroyCalls += 1; this.destroyed = true; }
       };
       sessions.push(session);
@@ -232,6 +246,105 @@ test("upcoming cues translate after the visible cue and yield to a new visible r
     ["visible-1", "visible-2"]);
 });
 
+test("a cached visible cue keeps the overlapping prefetch and completes the next five", async () => {
+  const h = harness({ cacheAware: true });
+  h.configure("client");
+  h.port.send({ type: "prefetch", clientId: "client", sourceLanguage: "en",
+    texts: ["Current", "Ahead 1", "Ahead 2", "Ahead 3", "Ahead 4"] });
+  await settle();
+  const session = h.sessions[0];
+  session.operations[0].resolve("현재");
+  await settle();
+  const inFlight = session.operations[1];
+  assert.equal(inFlight.text, "Ahead 1");
+
+  h.translate("client", "visible", "Current");
+  h.port.send({ type: "prefetch", clientId: "client", sourceLanguage: "en",
+    texts: ["Ahead 1", "Ahead 2", "Ahead 3", "Ahead 4", "Ahead 5"] });
+  await settle();
+  assert.equal(inFlight.signal.aborted, false, "an ongoing upcoming cue remains useful after the window slides");
+  assert.deepEqual(h.results().filter(message => message.type === "done"),
+    [{ type: "done", clientId: "client", requestId: "visible", text: "현재" }]);
+
+  for (let index = 1; index <= 5; index += 1) {
+    assert.equal(session.operations[index].text, `Ahead ${index}`);
+    session.operations[index].resolve(`번역 ${index}`);
+    await settle();
+  }
+  assert.deepEqual(session.operations.map(operation => operation.text),
+    ["Current", "Ahead 1", "Ahead 2", "Ahead 3", "Ahead 4", "Ahead 5"]);
+});
+
+test("an in-flight upcoming cue becomes visible without aborting or translating twice", async () => {
+  const h = harness({ cacheAware: true, serialized: true });
+  h.configure("client");
+  h.port.send({ type: "prefetch", clientId: "client", sourceLanguage: "en",
+    texts: ["Now visible", "Ahead 1", "Ahead 2", "Ahead 3", "Ahead 4"] });
+  await settle();
+  const session = h.sessions[0];
+  const inFlight = session.operations[0];
+  h.translate("client", "visible", "Now visible");
+  h.port.send({ type: "prefetch", clientId: "client", sourceLanguage: "en",
+    texts: ["Ahead 1", "Ahead 2", "Ahead 3", "Ahead 4", "Ahead 5"] });
+  await settle();
+  assert.equal(inFlight.signal.aborted, false);
+  assert.deepEqual(session.operations.map(operation => operation.text), ["Now visible"]);
+
+  inFlight.update("지금");
+  assert.deepEqual(h.results().filter(message => message.type === "update"),
+    [{ type: "update", clientId: "client", requestId: "visible", text: "지금" }],
+    "the in-flight prefetch streams its next chunk to the visible cue immediately");
+
+  inFlight.resolve("현재");
+  await settle();
+  assert.deepEqual(h.results().filter(message => message.type === "done"),
+    [{ type: "done", clientId: "client", requestId: "visible", text: "현재" }]);
+  for (let index = 1; index <= 5; index += 1) {
+    assert.equal(session.operations[index].text, `Ahead ${index}`);
+    session.operations[index].resolve(`번역 ${index}`);
+    await settle();
+  }
+  assert.deepEqual(session.operations.map(operation => operation.text),
+    ["Now visible", "Ahead 1", "Ahead 2", "Ahead 3", "Ahead 4", "Ahead 5"]);
+});
+
+test("the final cue keeps its in-flight prefetch when no future cues remain", async () => {
+  const h = harness({ cacheAware: true, serialized: true });
+  h.configure("client");
+  h.port.send({ type: "prefetch", clientId: "client", sourceLanguage: "en", texts: ["Final cue"] });
+  await settle();
+  const session = h.sessions[0];
+  const inFlight = session.operations[0];
+  h.translate("client", "visible", "Final cue");
+  h.port.send({ type: "prefetch", clientId: "client", sourceLanguage: "en", texts: [] });
+  await settle();
+  assert.equal(inFlight.signal.aborted, false);
+  inFlight.update("마지막");
+  assert.deepEqual(h.results().filter(message => message.type === "update"),
+    [{ type: "update", clientId: "client", requestId: "visible", text: "마지막" }]);
+  inFlight.resolve("마지막 자막");
+  await settle();
+  assert.deepEqual(session.operations.map(operation => operation.text), ["Final cue"]);
+  assert.deepEqual(h.results().filter(message => message.type === "done"),
+    [{ type: "done", clientId: "client", requestId: "visible", text: "마지막 자막" }]);
+});
+
+test("cancelled visible requests receive no later chunks from a promoted prefetch", async () => {
+  const h = harness({ cacheAware: true, serialized: true });
+  h.configure("client");
+  h.port.send({ type: "prefetch", clientId: "client", sourceLanguage: "en", texts: ["Moving cue"] });
+  await settle();
+  const inFlight = h.sessions[0].operations[0];
+  h.translate("client", "old-visible", "Moving cue");
+  inFlight.update("첫 조각");
+  h.port.send({ type: "cancel", clientId: "client", requestId: "old-visible" });
+  inFlight.update("늦은 조각");
+  inFlight.resolve("완료");
+  await settle();
+  assert.deepEqual(h.results(),
+    [{ type: "update", clientId: "client", requestId: "old-visible", text: "첫 조각" }]);
+});
+
 test("an interrupted prefetch resumes after another video's fast visible cue completes", async () => {
   const h = harness();
   h.configure("background");
@@ -256,6 +369,46 @@ test("an interrupted prefetch resumes after another video's fast visible cue com
   session.operations[3].resolve("앞 자막 둘");
   await settle();
   assert.deepEqual(h.results().filter(message => message.type === "done").map(message => message.requestId), ["visible"]);
+});
+
+test("an untranslated visible cue preempts prefetch from another language", async () => {
+  const h = harness();
+  h.configure("background", "en");
+  h.configure("foreground", "ja");
+  h.port.send({ type: "prefetch", clientId: "background", sourceLanguage: "en", texts: ["English ahead"] });
+  await settle();
+  const speculative = h.sessions.find(session => session.language === "en").operations[0];
+  h.translate("foreground", "visible", "今", "ja");
+  assert.equal(speculative.signal.aborted, true, "foreground work interrupts another language's speculation");
+  await settle();
+  const japanese = h.sessions.find(session => session.language === "ja").operations[0];
+  assert.equal(japanese.text, "今");
+  japanese.resolve("지금");
+  speculative.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+  await settle();
+  assert.deepEqual(h.results().filter(message => message.type === "done").map(message => message.requestId), ["visible"]);
+});
+
+test("another visible client does not abort a stream already promoted for the first", async () => {
+  const h = harness({ cacheAware: true });
+  h.configure("first", "en");
+  h.configure("second", "ja");
+  h.port.send({ type: "prefetch", clientId: "first", sourceLanguage: "en", texts: ["First current"] });
+  await settle();
+  const first = h.sessions.find(session => session.language === "en").operations[0];
+  h.translate("first", "first-visible", "First current", "en");
+  h.translate("second", "second-visible", "二番目", "ja");
+  await settle();
+  assert.equal(first.signal.aborted, false);
+  const second = h.sessions.find(session => session.language === "ja").operations[0];
+  first.update("첫 번째");
+  assert.deepEqual(h.results().filter(message => message.type === "update"),
+    [{ type: "update", clientId: "first", requestId: "first-visible", text: "첫 번째" }]);
+  first.resolve("첫 번째 완료");
+  second.resolve("두 번째 완료");
+  await settle();
+  assert.deepEqual(h.results().filter(message => message.type === "done").map(message => message.requestId),
+    ["first-visible", "second-visible"]);
 });
 
 test("cancelling a cue awaiting model download prevents it from starting after preparation", async () => {

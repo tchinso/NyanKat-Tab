@@ -93,8 +93,8 @@
     job.controller.abort();
   }
 
-  function hasForeground(language) {
-    return [...jobs.values()].some(job => job.sourceLanguage === language);
+  function hasForeground() {
+    return jobs.size > 0;
   }
 
   function cancelPrefetch(clientId) {
@@ -104,18 +104,56 @@
     batch.controller?.abort();
   }
 
-  function pausePrefetches(language) {
+  function pausePrefetches(visibleClientId, visibleText) {
     for (const batch of prefetches.values()) {
-      if (batch.sourceLanguage !== language) continue;
       batch.paused = true;
-      batch.controller?.abort();
+      // If the upcoming cue has become visible, let that exact stream finish.
+      // Its streamed chunks can serve the foreground request directly.
+      const becomingVisible = batch.clientId === visibleClientId && batch.activeText === visibleText;
+      const alreadyVisibleElsewhere = batch.clientId !== visibleClientId &&
+        jobs.get(batch.clientId)?.promotedBatch === batch;
+      if (!becomingVisible && !alreadyVisibleElsewhere) {
+        batch.controller?.abort();
+      }
     }
   }
 
-  function resumePrefetches(language) {
-    if (hasForeground(language)) return;
+  function resumePrefetches() {
+    if (hasForeground()) return;
     for (const batch of prefetches.values()) {
-      if (batch.sourceLanguage !== language || batch.waiting) continue;
+      if (batch.waiting) continue;
+      batch.paused = false;
+      void runPrefetch(batch);
+    }
+  }
+
+  function updatePrefetch(clientId, language, texts) {
+    if (!texts.length) {
+      const batch = prefetches.get(clientId);
+      if (batch?.activeText && jobs.get(clientId)?.promotedBatch === batch &&
+        !batch.controller?.signal.aborted) {
+        // The last cue has no following window, but its speculative stream is
+        // now supplying the visible request. Let that stream reach the cache.
+        batch.texts = [];
+        return;
+      }
+      cancelPrefetch(clientId);
+      return;
+    }
+    let batch = prefetches.get(clientId);
+    if (!batch || batch.sourceLanguage !== language) {
+      cancelPrefetch(clientId);
+      batch = { clientId, sourceLanguage: language, texts: [...texts], activeText: null,
+        controller: null, running: false, paused: false, waiting: false };
+      prefetches.set(clientId, batch);
+    } else {
+      // Sliding the five-cue window must not discard a translation that is
+      // still wanted. Already completed texts are found in the session cache.
+      batch.texts = [...texts];
+      const promoted = jobs.get(clientId)?.promotedBatch === batch;
+      if (batch.activeText && !texts.includes(batch.activeText) && !promoted) batch.controller?.abort();
+    }
+    if (!hasForeground() && !batch.waiting) {
       batch.paused = false;
       void runPrefetch(batch);
     }
@@ -123,7 +161,7 @@
 
   async function runPrefetch(batch) {
     if (closed || batch.running || batch.paused || batch.waiting ||
-      prefetches.get(batch.clientId) !== batch || hasForeground(batch.sourceLanguage)) return;
+      prefetches.get(batch.clientId) !== batch || hasForeground()) return;
     batch.running = true;
     const controller = new AbortController();
     batch.controller = controller;
@@ -132,23 +170,46 @@
       // Model creation can be shared with the visible cue. Do not abort that
       // preparation when playback seeks to a new cue.
       await entry.session.prepare();
-      while (batch.next < batch.texts.length && !controller.signal.aborted &&
+      while (batch.texts.length && !batch.paused && !controller.signal.aborted &&
         prefetches.get(batch.clientId) === batch) {
-        const text = batch.texts[batch.next];
-        if (typeof entry.session.cached !== "function" || entry.session.cached(text) === null) {
-          await entry.session.translateLines(text, { signal: controller.signal });
+        const text = batch.texts[0];
+        batch.activeText = text;
+        const cached = typeof entry.session.cached === "function" ? entry.session.cached(text) : null;
+        const translated = cached !== null ? cached : await entry.session.translateLines(text, {
+          signal: controller.signal,
+          onUpdate(value) {
+            const job = jobs.get(batch.clientId);
+            if (!controller.signal.aborted && job?.promotedBatch === batch && job.text === text) {
+              send({ type: "update", clientId: job.clientId, requestId: job.requestId, text: value });
+            }
+          }
+        });
+        if (controller.signal.aborted) break;
+        const index = batch.texts.indexOf(text);
+        if (index !== -1) batch.texts.splice(index, 1);
+        batch.activeText = null;
+        const job = jobs.get(batch.clientId);
+        if (job?.promotedBatch === batch && job.text === text) {
+          jobs.delete(job.clientId);
+          send({ type: "done", clientId: job.clientId, requestId: job.requestId, text: translated });
+          resumePrefetches();
         }
-        batch.next += 1;
       }
     } catch {
       if (!controller.signal.aborted && prefetches.get(batch.clientId) === batch) batch.waiting = true;
     } finally {
       batch.running = false;
+      const job = jobs.get(batch.clientId);
+      if (job?.promotedBatch === batch) {
+        job.promotedBatch = null;
+        void run(job);
+      }
+      batch.activeText = null;
       batch.controller = null;
-      if (prefetches.get(batch.clientId) === batch && batch.next >= batch.texts.length) {
+      if (prefetches.get(batch.clientId) === batch && !batch.texts.length) {
         prefetches.delete(batch.clientId);
       } else if (prefetches.get(batch.clientId) === batch && !batch.paused &&
-        !batch.waiting && !hasForeground(batch.sourceLanguage)) {
+        !batch.waiting && !hasForeground()) {
         // A visible cue may finish before the aborted prefetch unwinds.
         // Restart it now that both the foreground job and abort are settled.
         void runPrefetch(batch);
@@ -163,7 +224,8 @@
     try {
       await entry.session.prepare();
       if (jobs.get(job.clientId) !== job) return;
-      const text = await entry.session.translateLines(job.text, {
+      const cached = typeof entry.session.cached === "function" ? entry.session.cached(job.text) : null;
+      const text = cached !== null ? cached : await entry.session.translateLines(job.text, {
         signal: job.controller.signal,
         onUpdate(text) {
           if (jobs.get(job.clientId) === job) send({ type: "update", clientId: job.clientId, requestId: job.requestId, text });
@@ -180,18 +242,18 @@
       send({ type: "status", clientId: job.clientId, sourceLanguage: job.sourceLanguage, status: entry.session.status });
     } finally {
       job.running = false;
-      resumePrefetches(job.sourceLanguage);
+      resumePrefetches();
     }
   }
 
   function resumeLanguage(language) {
     for (const job of jobs.values()) {
-      if (job.sourceLanguage === language) void run(job);
+      if (job.sourceLanguage === language && !job.promotedBatch) void run(job);
     }
     for (const batch of prefetches.values()) {
       if (batch.sourceLanguage === language) batch.waiting = false;
     }
-    resumePrefetches(language);
+    resumePrefetches();
   }
 
   port.onMessage.addListener(message => {
@@ -202,7 +264,7 @@
       cancelPrefetch(message.clientId);
       const language = oldLanguage;
       clients.delete(message.clientId);
-      if (language) resumePrefetches(language);
+      if (language) resumePrefetches();
       updateKeepAlive();
       if (language && ![...clients.values()].includes(language)) {
         const entry = sessions.get(language);
@@ -216,7 +278,7 @@
     if (message.type === "cancel") {
       const language = clients.get(message.clientId);
       cancel(message.clientId, message.requestId);
-      if (language) resumePrefetches(language);
+      if (language) resumePrefetches();
       return;
     }
     if (!["configure", "translate", "prefetch"].includes(message.type)) return;
@@ -225,21 +287,15 @@
     if (previous !== language) {
       cancel(message.clientId);
       cancelPrefetch(message.clientId);
-      if (previous) resumePrefetches(previous);
+      if (previous) resumePrefetches();
       dismissed = false;
     }
     clients.set(message.clientId, language);
     updateKeepAlive();
     const entry = getSession(language);
     if (message.type === "prefetch") {
-      cancelPrefetch(message.clientId);
       const texts = Array.isArray(message.texts) ? message.texts : [];
-      if (texts.length) {
-        const batch = { clientId: message.clientId, sourceLanguage: language, texts,
-          next: 0, controller: null, running: false, paused: false, waiting: false };
-        prefetches.set(message.clientId, batch);
-        void runPrefetch(batch);
-      }
+      updatePrefetch(message.clientId, language, texts);
       return;
     }
     if (message.type === "configure") {
@@ -248,12 +304,16 @@
       updateUi();
       return;
     }
-    pausePrefetches(language);
+    const cached = typeof entry.session.cached === "function" ? entry.session.cached(message.text) : null;
+    if (cached === null) pausePrefetches(message.clientId, message.text);
     cancel(message.clientId);
-    cancelPrefetch(message.clientId);
-    const job = { ...message, sourceLanguage: language, controller: new AbortController(), running: false };
+    const batch = prefetches.get(message.clientId);
+    const promotedBatch = cached === null && batch?.activeText === message.text &&
+      !batch.controller?.signal.aborted ? batch : null;
+    const job = { ...message, sourceLanguage: language, controller: new AbortController(),
+      running: false, promotedBatch };
     jobs.set(message.clientId, job);
-    void run(job);
+    if (!promotedBatch) void run(job);
   });
 
   document.querySelector("#dismiss").addEventListener("click", () => {

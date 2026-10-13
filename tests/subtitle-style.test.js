@@ -9,7 +9,7 @@ const vm = require("node:vm");
 const root = path.join(__dirname, "..");
 const window = {};
 vm.runInNewContext(fs.readFileSync(path.join(root, "subtitle-style.js"), "utf8"), { window });
-const { DEFAULT_STYLE, normalizeStyle, FONT_GROUPS, fontValue } = window.NyanKatSubtitleStyle;
+const { DEFAULT_STYLE, MAX_PRESETS, normalizeStyle, normalizePresets, FONT_GROUPS, fontValue } = window.NyanKatSubtitleStyle;
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function fontHarness(options = {}) {
@@ -88,9 +88,9 @@ const customStyle = {
   shadowColor: "#fedcba", shadowBlur: 15, shadowX: -12, shadowY: 18
 };
 
-test("every subtitle display option survives normalization without mutating its input", () => {
+test("subtitle styles normalize legacy visibility to shown without mutating the input", () => {
   const input = { ...customStyle, unknownSetting: "discard" };
-  assert.deepEqual(plain(normalizeStyle(input)), customStyle);
+  assert.deepEqual(plain(normalizeStyle(input)), { ...customStyle, visible: true });
   assert.equal(input.unknownSetting, "discard");
   assert.equal(Object.keys(DEFAULT_STYLE).length, Object.keys(customStyle).length);
   assert.deepEqual(plain(normalizeStyle(null)), plain(DEFAULT_STYLE));
@@ -128,16 +128,31 @@ test("invalid stored colors, booleans and unsupported modes use existing safe va
   }
   assert.equal(normalizeStyle({ outline: "unknown" }, customStyle).outline, "double");
   assert.equal(normalizeStyle({ background: "bubble" }, customStyle).background, "pill");
-  for (const key of ["textShadow", "visible", "useGradient"]) {
+  for (const key of ["textShadow", "useGradient"]) {
     assert.equal(normalizeStyle({ [key]: "false" }, customStyle)[key], customStyle[key]);
     assert.equal(normalizeStyle({ [key]: false }, customStyle)[key], false);
   }
+  assert.equal(normalizeStyle({ visible: false }, customStyle).visible, true);
   for (const outline of ["none", "line", "double", "neon"]) {
     assert.equal(normalizeStyle({ outline }).outline, outline);
   }
   for (const background of ["none", "rectangle", "box", "pill"]) {
     assert.equal(normalizeStyle({ background }).background, background);
   }
+});
+
+test("stored style presets are sanitized and capped at twenty", () => {
+  const stored = Array.from({ length: 22 }, (_, index) => ({
+    id: "preset-" + (index + 1), name: "스타일 " + (index + 1),
+    style: { fontSize: 40 + index, visible: false }
+  }));
+  stored.splice(1, 0, { id: "preset-1", name: "중복", style: {} });
+  const normalized = plain(normalizePresets(stored));
+  assert.equal(MAX_PRESETS, 20);
+  assert.equal(normalized.length, 20);
+  assert.equal(normalized[0].id, "preset-1");
+  assert.equal(normalized[1].id, "preset-2");
+  assert.equal(normalized[0].style.visible, true);
 });
 
 test("bundled font choices retain the requested groups alongside arbitrary installed PC fonts", () => {

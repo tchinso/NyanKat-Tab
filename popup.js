@@ -22,6 +22,57 @@ const tabButtons = Array.from(document.querySelectorAll("[role='tab']"));
 const tabPanels = Array.from(document.querySelectorAll("[role='tabpanel']"));
 const savedCheckboxValues = {};
 let statusTimer = 0;
+let currentTab = "basic";
+const loadedScripts = new Map();
+let subtitleScriptsReady;
+let downloadScriptsReady;
+
+function loadScript(filename) {
+  if (!loadedScripts.has(filename)) {
+    const promise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = chrome.runtime.getURL(filename);
+      script.onload = resolve;
+      script.onerror = () => {
+        script.remove();
+        reject(new Error("Failed to load " + filename));
+      };
+      document.body.append(script);
+    }).catch((error) => {
+      loadedScripts.delete(filename);
+      throw error;
+    });
+    loadedScripts.set(filename, promise);
+  }
+  return loadedScripts.get(filename);
+}
+
+function ensureSubtitleScripts() {
+  if (!subtitleScriptsReady) {
+    subtitleScriptsReady = (async () => {
+      await loadScript("subtitle-translation.js");
+      await loadScript("subtitle-popup.js");
+    })().catch((error) => {
+      subtitleScriptsReady = null;
+      throw error;
+    });
+  }
+  return subtitleScriptsReady;
+}
+
+function ensureDownloadScripts() {
+  if (!downloadScriptsReady) {
+    downloadScriptsReady = (async () => {
+      await ensureSubtitleScripts();
+      await loadScript("subtitle-extractor.js");
+      await loadScript("download-popup.js");
+    })().catch((error) => {
+      downloadScriptsReady = null;
+      throw error;
+    });
+  }
+  return downloadScriptsReady;
+}
 
 function setStatus(text) {
   window.clearTimeout(statusTimer);
@@ -45,6 +96,7 @@ function saveSetting(key, value) {
 }
 
 function showTab(tabName) {
+  currentTab = tabName;
   for (const button of tabButtons) {
     const selected = button.id === tabName + "Tab";
     button.setAttribute("aria-selected", String(selected));
@@ -54,9 +106,20 @@ function showTab(tabName) {
     panel.hidden = panel.id !== tabName + "Panel";
   }
 
-  document.dispatchEvent(new CustomEvent("nyankat-popup-tab-shown", {
-    detail: { tabName }
-  }));
+  const ready = tabName === "download" ? ensureDownloadScripts()
+    : tabName === "subtitle" ? ensureSubtitleScripts() : Promise.resolve();
+  void ready.then(() => {
+    if (currentTab === tabName) {
+      document.dispatchEvent(new CustomEvent("nyankat-popup-tab-shown", {
+        detail: { tabName }
+      }));
+    }
+  }).catch(() => {
+    const status = document.querySelector(tabName === "download" ? "#downloadStatus" : "#subtitleStatus");
+    if (status && currentTab === tabName) {
+      status.textContent = "탭을 불러오지 못했습니다. 다른 탭으로 이동한 뒤 다시 시도하세요.";
+    }
+  });
 }
 
 window.NyanKatPopup = { showTab };

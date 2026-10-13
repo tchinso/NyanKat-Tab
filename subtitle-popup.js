@@ -12,7 +12,7 @@
     unload: document.querySelector("#unloadSubtitle"),
     status: document.querySelector("#subtitleStatus")
   };
-  const { DEFAULT_STYLE, FONT_GROUPS, normalizeStyle, fontValue, ensureFont } = window.NyanKatSubtitleStyle;
+  const { DEFAULT_STYLE, FONT_GROUPS, MAX_PRESETS, normalizeStyle, normalizePresets, fontValue, ensureFont } = window.NyanKatSubtitleStyle;
   const translation = window.NyanKatSubtitleTranslation;
   const languages = translation?.LANGUAGES || [{ value: "ko", label: "한국어(번역하지 않음)", pinned: true }];
   const otherLanguages = document.createElement("optgroup");
@@ -37,7 +37,7 @@
     bgPadding: "subtitleBackgroundPadding", bgBorderWidth: "subtitleBackgroundBorderWidth",
     bgOpacity: "subtitleBackgroundOpacity", textShadow: "subtitleTextShadow",
     shadowColor: "subtitleShadowColor", shadowBlur: "subtitleShadowBlur",
-    shadowX: "subtitleShadowX", shadowY: "subtitleShadowY", visible: "subtitleVisible"
+    shadowX: "subtitleShadowX", shadowY: "subtitleShadowY"
   };
   const controls = Object.fromEntries(Object.entries(controlIds).map(([key, id]) =>
     [key, document.querySelector("#" + id)]
@@ -50,6 +50,9 @@
   let styleRevision = 0;
   let styleWrite = Promise.resolve();
   let savedStyle = { ...DEFAULT_STYLE };
+  let stylePresets = [];
+  let selectedPresetId = "";
+  let presetsLoaded = false;
   let importedFile = null;
   let languageTouched = false;
   let videoRefresh = Promise.resolve();
@@ -58,6 +61,12 @@
   const postprocessDialog = document.querySelector("#subtitlePostprocessDialog");
   const postprocessInput = document.querySelector("#subtitlePostprocessDictionary");
   const postprocessStatus = document.querySelector("#subtitlePostprocessStatus");
+  const presetSelect = document.querySelector("#subtitleStylePreset");
+  const savePresetButton = document.querySelector("#saveSubtitleStylePreset");
+  const deletePresetButton = document.querySelector("#deleteSubtitleStylePreset");
+  const presetDialog = document.querySelector("#subtitleStylePresetDialog");
+  const presetName = document.querySelector("#subtitleStylePresetName");
+  const presetError = document.querySelector("#subtitleStylePresetError");
   const postprocessReady = chrome.storage.local.get("subtitlePostprocessDictionary").then(result => {
     postprocessDictionary = typeof result.subtitlePostprocessDictionary === "string"
       ? result.subtitlePostprocessDictionary.slice(0, 65536) : "";
@@ -68,17 +77,55 @@
   }
   updateLanguageFields();
 
-  function persistStyle(settings) {
+  function persistStyle(settings, writePresets = false) {
     savedStyle = normalizeStyle(settings);
+    const selectedPreset = stylePresets.find(preset => preset.id === selectedPresetId);
+    if (selectedPreset) selectedPreset.style = { ...savedStyle };
     // Dispatch immediately: a popup can close before a debounce or promise queue runs.
     try {
-      void Promise.resolve(chrome.storage.local.set({
+      const data = {
         subtitleStyle: { ...savedStyle },
         subtitleFont: savedStyle.font
-      })).catch(() => setStatus("스타일을 저장하지 못했습니다."));
+      };
+      if (presetsLoaded && (selectedPreset || writePresets)) {
+        data.subtitleStylePresets = stylePresets;
+        data.subtitleStylePresetId = selectedPresetId;
+      }
+      void Promise.resolve(chrome.storage.local.set(data))
+        .catch(() => setStatus("스타일을 저장하지 못했습니다."));
     } catch {
       setStatus("스타일을 저장하지 못했습니다.");
     }
+  }
+
+  function renderPresetOptions() {
+    const current = document.createElement("option");
+    current.value = "";
+    current.textContent = "현재 스타일";
+    presetSelect.replaceChildren(current);
+    for (const preset of stylePresets) {
+      const option = document.createElement("option");
+      option.value = preset.id;
+      option.textContent = preset.name;
+      presetSelect.append(option);
+    }
+    if (!stylePresets.some(preset => preset.id === selectedPresetId)) selectedPresetId = "";
+    presetSelect.value = selectedPresetId;
+    savePresetButton.disabled = stylePresets.length >= MAX_PRESETS;
+    savePresetButton.title = savePresetButton.disabled ? "스타일은 최대 20개까지 저장할 수 있습니다." : "";
+    deletePresetButton.disabled = !selectedPresetId;
+  }
+
+  function nextPresetName() {
+    let number = 1;
+    while (stylePresets.some(preset => preset.name === "스타일 " + number)) number += 1;
+    return "스타일 " + number;
+  }
+
+  function nextPresetId() {
+    let number = 1;
+    while (stylePresets.some(preset => preset.id === "preset-" + number)) number += 1;
+    return "preset-" + number;
   }
 
   function selectFont(font) {
@@ -100,10 +147,16 @@
   async function loadSavedStyle() {
     const revision = styleRevision;
     try {
-      const result = await chrome.storage.local.get(["subtitleStyle", "subtitleFont"]);
-      if (styleRevision !== revision) {
-        return;
-      }
+      const result = await chrome.storage.local.get([
+        "subtitleStyle", "subtitleFont", "subtitleStylePresets", "subtitleStylePresetId"
+      ]);
+      stylePresets = normalizePresets(result?.subtitleStylePresets);
+      presetsLoaded = true;
+      selectedPresetId = styleRevision === revision &&
+        stylePresets.some(preset => preset.id === result?.subtitleStylePresetId)
+        ? result.subtitleStylePresetId : "";
+      renderPresetOptions();
+      if (styleRevision !== revision) return;
       const legacyFont = typeof result?.subtitleFont === "string" && result.subtitleFont.trim()
         ? result.subtitleFont : DEFAULT_STYLE.font;
       savedStyle = normalizeStyle(result?.subtitleStyle, { ...DEFAULT_STYLE, font: legacyFont });
@@ -134,6 +187,7 @@
       value: fontValue(font.family), label: font.label
     })));
   }
+  renderPresetOptions();
   applyStyle(savedStyle);
   const styleReady = loadSavedStyle();
   void populateFontList();
@@ -651,6 +705,72 @@
       }
     });
   }
+
+  presetSelect.addEventListener("change", () => {
+    selectedPresetId = presetSelect.value;
+    renderPresetOptions();
+    const preset = stylePresets.find(item => item.id === selectedPresetId);
+    if (preset) {
+      applyStyle(preset.style);
+      queueStyleUpdate();
+      void warmSelectedFont();
+      setStatus("‘" + preset.name + "’ 스타일을 적용했습니다.");
+    } else {
+      styleRevision += 1;
+      void chrome.storage.local.set({ subtitleStylePresetId: "" }).catch(() =>
+        setStatus("스타일 선택을 저장하지 못했습니다."));
+      setStatus("현재 스타일을 계속 편집합니다.");
+    }
+  });
+
+  savePresetButton.addEventListener("click", async () => {
+    await styleReady;
+    if (stylePresets.length >= MAX_PRESETS) {
+      setStatus("스타일은 최대 20개까지 저장할 수 있습니다.");
+      return;
+    }
+    presetName.value = nextPresetName();
+    presetError.textContent = "";
+    presetDialog.showModal();
+    presetName.focus?.();
+    presetName.select?.();
+  });
+
+  document.querySelector("#cancelSubtitleStylePreset").addEventListener("click", () => presetDialog.close());
+  document.querySelector("#subtitleStylePresetForm").addEventListener("submit", event => {
+    event.preventDefault();
+    const name = presetName.value.trim();
+    if (!name || name.length > 40) {
+      presetError.textContent = "이름을 1~40자로 입력하세요.";
+      return;
+    }
+    if (stylePresets.some(preset => preset.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      presetError.textContent = "같은 이름의 스타일이 이미 있습니다.";
+      return;
+    }
+    if (stylePresets.length >= MAX_PRESETS) {
+      presetDialog.close();
+      setStatus("스타일은 최대 20개까지 저장할 수 있습니다.");
+      return;
+    }
+    const preset = { id: nextPresetId(), name, style: readStyle() };
+    stylePresets.push(preset);
+    selectedPresetId = preset.id;
+    renderPresetOptions();
+    persistStyle(preset.style, true);
+    presetDialog.close();
+    setStatus("‘" + name + "’ 스타일을 저장했습니다.");
+  });
+
+  deletePresetButton.addEventListener("click", () => {
+    const preset = stylePresets.find(item => item.id === selectedPresetId);
+    if (!preset) return;
+    stylePresets = stylePresets.filter(item => item.id !== preset.id);
+    selectedPresetId = "";
+    renderPresetOptions();
+    persistStyle(readStyle(), true);
+    setStatus("‘" + preset.name + "’ 스타일을 삭제했습니다.");
+  });
 
   document.addEventListener("nyankat-popup-tab-shown", (event) => {
     if (event.detail && event.detail.tabName === "subtitle") {

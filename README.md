@@ -14,9 +14,11 @@ Chrome MV3 extension for:
 - downloading detected soft subtitles from the popup's separate **자막추출** tab
 - applying local subtitles to videos using the existing **자막** overlay tab
 - streaming subtitle translation into Korean using the browser's on-device Translator API, with a saved literal postprocessing dictionary
-- saving every subtitle display option, including built-in/installed fonts, text spacing, gradient fills, outlines, backgrounds, and shadows
+- saving every subtitle display option, including built-in/installed fonts, text spacing, gradient fills, outlines, backgrounds, and shadows, with up to 20 named style presets
 - unlocking disabled `button` elements, closing newly opened tooltips and the Kiosk support popup, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
 - persisting the YouTube, kone.gg decoder, and floating scroll settings across browser restarts
+
+Version **1.5.3** keeps five upcoming subtitle cues queued for translation while giving the visible cue priority, adds up to 20 saved subtitle styles, removes the redundant subtitle visibility checkbox, and loads subtitle and extraction code when those tabs are opened to reduce the popup's first-launch work.
 
 Version **1.5.2** reorders the Basic tab actions, starts translation when a text drag ends without requiring a hover, and fixes repeated YouTube visits, Base64 decoding on changing page text, overlapping subtitle cues, failed setting saves and imports, and canceled fallback navigations.
 

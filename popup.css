@@ -190,6 +190,14 @@ footer {
   gap: 10px;
 }
 
+.subtitle-preset-row select {
+  grid-column: 2 / -1;
+}
+
+.subtitle-preset-actions {
+  margin-top: 4px;
+}
+
 .subtitle-style-group {
   border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
   border-radius: 8px;
@@ -435,7 +443,8 @@ button:hover {
   margin: 4px 0 12px;
 }
 
-#subtitlePostprocessDialog {
+#subtitlePostprocessDialog,
+#subtitleStylePresetDialog {
   box-sizing: border-box;
   width: calc(100% - 24px);
   max-height: calc(100vh - 24px);
@@ -446,8 +455,25 @@ button:hover {
   padding: 16px;
 }
 
-#subtitlePostprocessDialog::backdrop {
+#subtitlePostprocessDialog::backdrop,
+#subtitleStylePresetDialog::backdrop {
   background: #0007;
+}
+
+#subtitleStylePresetForm {
+  display: grid;
+  gap: 10px;
+}
+
+#subtitleStylePresetName {
+  box-sizing: border-box;
+  background: Canvas;
+  border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 6px;
+  color: CanvasText;
+  min-height: 34px;
+  padding: 5px 8px;
+  width: 100%;
 }
 
 #subtitlePostprocessDictionary {
