@@ -87,6 +87,7 @@
           ok: true,
           text: message.text,
           contentType: clean(message.contentType, 150),
+          responseUrl: safeUrl(message.responseUrl) || pending.url,
           ...(message.complete === true ? { complete: true } : {}),
           ...(message.partial === true ? { partial: true } : {})
         });

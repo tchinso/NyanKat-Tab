@@ -263,6 +263,8 @@
 
   function onPointerDown(event) {
     if (!event.isTrusted) return;
+    suppressClickLink = null;
+    suppressClickUntil = 0;
     if (host && settings.closeOnOutsideClick && !pinned && !event.composedPath().includes(host) && event.button === 0) {
       closePreview();
     }
@@ -280,7 +282,9 @@
       pendingLink = null;
       if (!link.isConnected || pinned && host) return;
       suppressClickLink = link;
-      suppressClickUntil = Date.now() + 1500;
+      // The user may keep holding after the preview opens. Start the click
+      // suppression deadline on release, not while the button is still down.
+      suppressClickUntil = Infinity;
       openPreview(url, x, y);
     }, settings.longClickMs);
   }
@@ -296,7 +300,7 @@
 
   function onPointerOver(event) {
     if (!event.isTrusted) return;
-    if (!settings.enabled || settings.trigger !== "longHover") return;
+    if (!settings.enabled || settings.trigger !== "longHover" || event.buttons) return;
     const link = linkFromEvent(event);
     const url = validLink(link);
     if (!url || link === pendingLink) return;
@@ -339,8 +343,15 @@
   document.addEventListener("pointermove", onPointerMove, true);
   document.addEventListener("pointerup", () => {
     if (settings.trigger === "longClick") clearGesture();
+    if (suppressClickLink) suppressClickUntil = Date.now() + 1500;
   }, true);
-  document.addEventListener("pointercancel", clearGesture, true);
+  function cancelPointerGesture() {
+    clearGesture();
+    suppressClickLink = null;
+    suppressClickUntil = 0;
+  }
+  document.addEventListener("pointercancel", cancelPointerGesture, true);
+  window.addEventListener("blur", () => { cancelPointerGesture(); dragLink = null; });
   document.addEventListener("pointerover", onPointerOver, true);
   document.addEventListener("pointerout", onPointerOut, true);
   document.addEventListener("wheel", clearGesture, true);

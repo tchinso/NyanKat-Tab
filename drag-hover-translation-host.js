@@ -81,7 +81,7 @@
       try {
         // Try the detected pair immediately after detector preparation. Some
         // browsers keep the original click activation through this operation.
-        const instance = await Translator.create({ ...pair, monitor });
+        const instance = await Translator.create({ ...pair, monitor: m => monitor(m, id) });
         if (!isCurrent(id)) { instance.destroy(); return null; }
         translators.set(language, instance);
         return instance;
@@ -152,8 +152,9 @@
     }
   }
 
-  function monitor(m) {
+  function monitor(m, id) {
     m.addEventListener("downloadprogress", event => {
+      if (!isCurrent(id)) return;
       const total = Number(event.total) || 1;
       const percent = Math.max(0, Math.min(100, Math.round(Number(event.loaded) / total * 100)));
       show("모델 다운로드 중… " + percent + "%", pendingAction);
@@ -163,14 +164,15 @@
   prepareButton.addEventListener("click", () => {
     if (!pendingAction || preparing) return;
     const action = pendingAction;
+    const id = requestId;
     preparing = true;
     show("모델을 준비 중…", action);
     // create() must run directly inside this iframe's click activation.
     let creation;
     try {
       creation = action.kind === "detector"
-        ? LanguageDetector.create({ monitor })
-        : Translator.create({ sourceLanguage: action.language, targetLanguage: "ko", monitor });
+        ? LanguageDetector.create({ monitor: m => monitor(m, id) })
+        : Translator.create({ sourceLanguage: action.language, targetLanguage: "ko", monitor: m => monitor(m, id) });
     } catch (error) {
       creation = Promise.reject(error);
     }
@@ -189,6 +191,10 @@
     }).catch(() => {
       preparing = false;
       prepareTranslatorAfterDetector = false;
+      if (!isCurrent(id)) {
+        void translate(requestId);
+        return;
+      }
       show("모델을 준비하지 못했습니다. 브라우저 설정을 확인한 뒤 다시 시도해 주세요.", action);
     });
   });

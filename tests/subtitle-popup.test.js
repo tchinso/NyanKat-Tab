@@ -137,9 +137,9 @@ async function harness(options = {}) {
         requests.push(request);
         if (options.hold?.(message)) return;
         if (message.type === "NYANKAT_SUBTITLE_PING") {
-          respond({ ok: true, videos: options.video ? [{ id: "video-1", width: 1280, height: 720, playing: true, inViewport: true }] : [] });
+          respond({ ok: true, videos: options.videos || (options.video ? [{ id: "video-1", width: 1280, height: 720, playing: true, inViewport: true }] : []) });
         } else {
-          respond({ ok: true, state: { settings: options.videoStyle || window.NyanKatSubtitleStyle.DEFAULT_STYLE, offsetMs: 0, sourceLanguage: options.sourceLanguage || "ko" } });
+          respond({ ok: true, state: { settings: options.videoStyle || window.NyanKatSubtitleStyle.DEFAULT_STYLE, offsetMs: options.offsetMs || 0, sourceLanguage: options.sourceLanguage || "ko" } });
         }
       }
     },
@@ -468,4 +468,105 @@ test("postprocess dialog saves a reusable dictionary and cancel discards edits",
   h.edit("subtitlePostprocessDictionary", "임시=수정");
   h.element("cancelSubtitlePostprocess").dispatchEvent({ type: "click" });
   assert.equal(saved.subtitlePostprocessDictionary, "플라스틱 뚜껑=플라흐타\n이름=교정");
+});
+
+test("sync buttons include pending manual edits and accumulate before delayed replies", async () => {
+  const h = await harness({ video: true, hold: message => message.type === "NYANKAT_SUBTITLE_SET_OFFSET" });
+  await h.refresh();
+  h.edit("subtitleOffset", "1000");
+  const later = h.document.querySelector('[data-offset-adjust="250"]');
+  later.dispatchEvent({ type: "click" });
+  later.dispatchEvent({ type: "click" });
+  assert.equal(h.element("subtitleOffset").value, "1500");
+  await h.flushTimers(160);
+  const requests = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_SET_OFFSET");
+  assert.deepEqual(requests.map(request => request.message.payload.offsetMs), [1250, 1500],
+    "the superseded manual debounce cannot overwrite the button adjustments");
+  requests[1].respond({ ok: true, state: { offsetMs: 1500 } });
+  await settle();
+  requests[0].respond({ ok: true, state: { offsetMs: 1250 } });
+  await settle();
+  assert.equal(h.element("subtitleOffset").value, "1500", "late replies cannot undo a more recent click");
+});
+
+test("sync buttons clamp the displayed offset before the next adjustment", async () => {
+  const h = await harness({ video: true, hold: message => message.type === "NYANKAT_SUBTITLE_SET_OFFSET" });
+  await h.refresh();
+  h.edit("subtitleOffset", "3599900");
+  h.document.querySelector('[data-offset-adjust="250"]').dispatchEvent({ type: "click" });
+  assert.equal(h.element("subtitleOffset").value, "3600000");
+  h.document.querySelector('[data-offset-adjust="-250"]').dispatchEvent({ type: "click" });
+  assert.equal(h.element("subtitleOffset").value, "3599750");
+});
+
+for (const pendingType of ["NYANKAT_SUBTITLE_GET_STATUS", "NYANKAT_SUBTITLE_UPDATE_STYLE"]) {
+  test(`sync buttons preserve the video's offset while ${pendingType} is pending`, async () => {
+    const h = await harness({ video: true, offsetMs: 5000, hold: message =>
+      message.type === pendingType || /NYANKAT_SUBTITLE_(?:SET|ADJUST)_OFFSET/.test(message.type) });
+    const refresh = h.window.NyanKatSubtitlePopup.refreshVideos();
+    await settle();
+    const pending = h.requests.find(request => request.message.type === pendingType);
+    assert.ok(pending);
+    const later = h.document.querySelector('[data-offset-adjust="250"]');
+    later.dispatchEvent({ type: "click" });
+    later.dispatchEvent({ type: "click" });
+    const adjustments = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_ADJUST_OFFSET");
+    assert.deepEqual(adjustments.map(request => request.message.payload.deltaMs), [250, 250]);
+    assert.ok(!h.requests.some(request => request.message.type === "NYANKAT_SUBTITLE_SET_OFFSET"),
+      "the initial zero field must not overwrite a stored offset");
+    adjustments[1].respond({ ok: true, state: { offsetMs: 5500 } });
+    await settle();
+    adjustments[0].respond({ ok: true, state: { offsetMs: 5250 } });
+    pending.respond({ ok: true, state: { offsetMs: 5000 } });
+    await refresh;
+    await settle();
+    assert.equal(h.element("subtitleOffset").value, "5500");
+    later.dispatchEvent({ type: "click" });
+    const absolute = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_SET_OFFSET");
+    assert.equal(absolute.message.payload.offsetMs, 5750);
+    absolute.respond({ ok: true, state: { offsetMs: 5750 } });
+    await settle();
+  });
+}
+
+test("sync buttons do not apply the previous video's displayed offset to a newly selected video", async () => {
+  let holdStatus = false;
+  const h = await harness({ videos: [
+    { id: "video-1", width: 1280, height: 720, playing: true, inViewport: true },
+    { id: "video-2", width: 640, height: 360, playing: false, inViewport: true }
+  ], offsetMs: 5000, hold: message => (holdStatus && message.type === "NYANKAT_SUBTITLE_GET_STATUS") ||
+    /NYANKAT_SUBTITLE_(?:SET|ADJUST)_OFFSET/.test(message.type) });
+  await h.refresh();
+  assert.equal(h.element("subtitleOffset").value, "5000");
+  holdStatus = true;
+  h.edit("videoSelect", "0:video-2", "change");
+  await settle();
+  h.document.querySelector('[data-offset-adjust="250"]').dispatchEvent({ type: "click" });
+  const adjustment = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_ADJUST_OFFSET");
+  assert.deepEqual(adjustment.message.payload, { videoId: "video-2", deltaMs: 250 });
+  adjustment.respond({ ok: true, state: { offsetMs: 9250 } });
+  await settle();
+  h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_GET_STATUS").at(-1)
+    .respond({ ok: true, state: { offsetMs: 9000 } });
+  await settle();
+  assert.equal(h.element("subtitleOffset").value, "9250");
+});
+
+test("an explicit manual offset can be adjusted before the video's status arrives", async () => {
+  const h = await harness({ video: true, hold: message => message.type === "NYANKAT_SUBTITLE_GET_STATUS" ||
+    message.type === "NYANKAT_SUBTITLE_SET_OFFSET" });
+  const refresh = h.window.NyanKatSubtitlePopup.refreshVideos();
+  await settle();
+  h.edit("subtitleOffset", "2000");
+  h.document.querySelector('[data-offset-adjust="250"]').dispatchEvent({ type: "click" });
+  await h.flushTimers(160);
+  const writes = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_SET_OFFSET");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].message.payload.offsetMs, 2250);
+  writes[0].respond({ ok: true, state: { offsetMs: 2250 } });
+  h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_GET_STATUS")
+    .respond({ ok: true, state: { offsetMs: 5000 } });
+  await refresh;
+  await settle();
+  assert.equal(h.element("subtitleOffset").value, "2250");
 });

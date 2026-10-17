@@ -56,6 +56,17 @@ test("SRT and ASS formatting is removed while spoken text and line breaks remain
   assert.equal(parser.parse("ass", ass)[0].text, "helloworld\nnew");
 });
 
+test("SRT whitespace-only separators do not leak the following cue into spoken text", () => {
+  const srt = "1\r\n00:00:01,000 --> 00:00:02,000\r\nFirst line\r\nSecond line\r\n \t \r\n2\r\n00:00:03,000 --> 00:00:04,000\r\nNext cue";
+  for (const format of ["auto", "srt"]) {
+    const cues = parser.parse(format, srt);
+    assert.equal(cues.length, 2);
+    assert.equal(cues[0].text, "First line\nSecond line");
+    assert.equal(cues[1].text, "Next cue");
+    assert.equal(cues[1].start, 3);
+  }
+});
+
 test("SMI HTML tags are removed and line breaks stay intact", () => {
   const smi = `<SAMI><BODY><SYNC Start=1000><P Class=KRCC><FONT COLOR="red">안녕</FONT><BR><i>세상</i><SYNC Start=2000><P>&nbsp;끝</P></BODY></SAMI>`;
   const cues = parser.parse("smi", smi);

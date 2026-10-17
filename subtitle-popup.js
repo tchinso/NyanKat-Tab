@@ -45,6 +45,7 @@
   const targetsByKey = new Map();
   let styleTimer = 0;
   let offsetTimer = 0;
+  let offsetTarget = null;
   let refreshVersion = 0;
   let uiRevision = 0;
   let styleRevision = 0;
@@ -362,6 +363,7 @@
     // Stored style and the user's edits are authoritative; overlay replies can be stale.
     if (state) {
       elements.offset.value = String(Math.round(Number(state.offsetMs) || 0));
+      offsetTarget = getSelectedTarget();
       if (restoreLanguage && !languageTouched && state.sourceLanguage) {
         elements.language.value = translation?.normalizeLanguage(state.sourceLanguage) || "ko";
         updateLanguageFields();
@@ -613,6 +615,7 @@
   function queueOffsetUpdate() {
     const revision = ++uiRevision;
     const target = getSelectedTarget();
+    offsetTarget = target;
     const offsetMs = Number(elements.offset.value) || 0;
     window.clearTimeout(offsetTimer);
     offsetTimer = window.setTimeout(async () => {
@@ -676,16 +679,27 @@
     button.addEventListener("click", async () => {
       const revision = ++uiRevision;
       const target = getSelectedTarget();
-      const response = await sendToSelectedTarget("NYANKAT_SUBTITLE_ADJUST_OFFSET", {
-        deltaMs: Number(button.dataset.offsetAdjust)
-      });
+      // Only use the field after this video's state has arrived or the user
+      // explicitly edited it. Before then, adjust the video's actual offset.
+      window.clearTimeout(offsetTimer);
+      const deltaMs = Number(button.dataset.offsetAdjust);
+      let response;
+      if (target && offsetTarget === target) {
+        // Include pending manual edits and accumulate clicks before replies.
+        const offsetMs = Math.min(3600000, Math.max(-3600000,
+          (Number(elements.offset.value) || 0) + deltaMs));
+        elements.offset.value = String(offsetMs);
+        response = await sendToSelectedTarget("NYANKAT_SUBTITLE_SET_OFFSET", { offsetMs });
+      } else {
+        response = await sendToSelectedTarget("NYANKAT_SUBTITLE_ADJUST_OFFSET", { deltaMs });
+      }
       if (!response || !response.ok) {
         setStatus("자막 싱크 조정에 실패했습니다.");
         return;
       }
 
       if (isCurrentRequest(target, revision)) {
-        elements.offset.value = String(Math.round(response.state.offsetMs));
+        applyState(response.state);
       }
       setStatus("자막 싱크를 조정했습니다.");
     });

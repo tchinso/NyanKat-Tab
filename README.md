@@ -18,6 +18,15 @@ Chrome MV3 extension for:
 - unlocking disabled `button` elements, closing newly opened tooltips and the Kiosk support popup, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
 - persisting the YouTube, kone.gg decoder, and floating scroll settings across browser restarts
 
+Version **1.5.4** fixes edge cases in playback, translation, previews, and settings:
+
+- YouTube's load event and fallback timer reset playback only once per visit.
+- Subtitle loading recognizes BOM-less UTF-16LE/BE and SRT separators containing spaces or tabs. Reapplying subtitles reconnects layout observers, rapid timing adjustments preserve pending input, and interrupted translations return to the original cue.
+- Redirected subtitle manifests keep their final URL so relative segments resolve correctly. Leaving the extraction tab stops pending polling startup, and older list responses cannot replace newer results.
+- Selected-text translation ignores model progress and failures belonging to an earlier selection.
+- Long-click previews suppress navigation even after a prolonged hold, and hover previews do not start while dragging. Losing window focus cancels pending gestures.
+- Scroll settings save only edited values, preserving button positions and unrelated settings changed elsewhere. Failed saves remain visible and are retried with the next edit.
+
 Version **1.5.3** keeps five upcoming subtitle cues queued for translation while giving the visible cue priority, adds up to 20 saved subtitle styles, removes the redundant subtitle visibility checkbox, and loads subtitle and extraction code when those tabs are opened to reduce the popup's first-launch work.
 
 Version **1.5.2** reorders the Basic tab actions, starts translation when a text drag ends without requiring a hover, and fixes repeated YouTube visits, Base64 decoding on changing page text, overlapping subtitle cues, failed setting saves and imports, and canceled fallback navigations.

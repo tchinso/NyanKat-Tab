@@ -118,10 +118,10 @@
     let segments = [];
     try {
       if (/^(?:hls|m3u8)$/.test(cached.format)) {
-        const playlist = inspection && inspection.playlist || engine.parseHls(cached.text, parentUrl);
+        const playlist = inspection && inspection.playlist || engine.parseHls(cached.text, cached.responseUrl || parentUrl);
         segments = playlist.segments || [];
       } else if (/^(?:dash|mpd)$/.test(cached.format)) {
-        const manifest = inspection && inspection.manifest || engine.parseDash(cached.text, parentUrl);
+        const manifest = inspection && inspection.manifest || engine.parseDash(cached.text, cached.responseUrl || parentUrl);
         segments = (manifest.tracks || []).flatMap(track => track.segments || []);
       }
     } catch (_) { return; }
@@ -207,7 +207,7 @@
     return encode ? encode.encode(text).byteLength : text.length * 2;
   }
 
-  function cacheResource(url, text, contentType, format) {
+  function cacheResource(url, text, contentType, format, responseUrl = url) {
     if (!url || typeof text !== "string") return;
     const bytes = resourceSize(text);
     if (!bytes || bytes > MAX_RESOURCE_BYTES) return;
@@ -221,7 +221,7 @@
       cacheBytes -= resources.get(oldestUrl).bytes;
       resources.delete(oldestUrl);
     }
-    resources.set(url, { text, contentType: clean(contentType, 150), format, bytes });
+    resources.set(url, { text, contentType: clean(contentType, 150), format, bytes, responseUrl });
     cacheBytes += bytes;
     scheduleNotify();
   }
@@ -246,7 +246,7 @@
     const isManifest = /^(?:hls|m3u8|dash|mpd)$/.test(format);
     if (isCaption || isManifest) {
       cacheResource(url, text, contentType, format);
-      if (originalUrl && originalUrl !== url) cacheResource(originalUrl, text, contentType, format);
+      if (originalUrl && originalUrl !== url) cacheResource(originalUrl, text, contentType, format, url);
     }
     if (isManifest) {
       rememberCaptionSegments(url, result);
@@ -667,11 +667,11 @@
     if (!parent) return false;
     try {
       if (/^(?:hls|m3u8)$/.test(parent.format)) {
-        const playlist = engine.parseHls(parent.text, parentUrl);
+        const playlist = engine.parseHls(parent.text, parent.responseUrl || parentUrl);
         return !playlist.unsupported && playlist.segments.some(segment => segment.url === url);
       }
       if (/^(?:dash|mpd)$/.test(parent.format)) {
-        return engine.parseDash(parent.text, parentUrl).tracks.some(track => !track.unsupported && (track.segments || []).some(segment => segment.url === url));
+        return engine.parseDash(parent.text, parent.responseUrl || parentUrl).tracks.some(track => !track.unsupported && (track.segments || []).some(segment => segment.url === url));
       }
     } catch (_) {}
     return false;
@@ -706,7 +706,7 @@
       inspectText(text, absoluteUrl(response.url || url), contentType, "page-fetch", url, !descendant);
       const cached = resources.get(url);
       if (!cached) return { ok: false, error: "not-caption-content" };
-      return { ok: true, text: cached.text, contentType: cached.contentType };
+      return { ok: true, text: cached.text, contentType: cached.contentType, responseUrl: cached.responseUrl };
     } catch (_) {
       return { ok: false, error: "captions-page-fetch-failed" };
     } finally {
@@ -735,7 +735,7 @@
       let response = { ok: false, error: "captions-not-cached" };
       const cached = resources.get(message.url);
       if (cached && (hasDiscoveredUrl(message.url) || isManifestDescendant(message.url, message.parentUrl) || /^(?:hls|m3u8|dash|mpd)$/.test(cached.format))) {
-        response = { ok: true, text: cached.text, contentType: cached.contentType };
+        response = { ok: true, text: cached.text, contentType: cached.contentType, responseUrl: cached.responseUrl };
         resources.delete(message.url);
         resources.set(message.url, cached);
       } else if (message.url.startsWith("nyankat-cues:") && hasDiscoveredUrl(message.url)) {

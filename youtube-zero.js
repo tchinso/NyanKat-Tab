@@ -85,11 +85,19 @@ function waitForVideoElement() {
 
 function sendZeroAfterVideoLoads(video, videoKey) {
   const player = document.querySelector("#movie_player") || video;
+  let handled = false;
+  let loadTimer = 0;
+  let fallbackTimer = 0;
+  const onLoadedData = () => { loadTimer = window.setTimeout(sendZero, 150); };
 
   const sendZero = () => {
-    if (!sendZeroOnYouTube || getVideoKey() !== videoKey) {
+    if (handled || !sendZeroOnYouTube || getVideoKey() !== videoKey) {
       return;
     }
+    handled = true;
+    window.clearTimeout(loadTimer);
+    window.clearTimeout(fallbackTimer);
+    video.removeEventListener("loadeddata", onLoadedData);
 
     try {
       player.focus({ preventScroll: true });
@@ -111,13 +119,13 @@ function sendZeroAfterVideoLoads(video, videoKey) {
   };
 
   if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-    window.setTimeout(sendZero, 150);
+    loadTimer = window.setTimeout(sendZero, 150);
     return;
   }
 
-  video.addEventListener("loadeddata", () => window.setTimeout(sendZero, 150), { once: true });
+  video.addEventListener("loadeddata", onLoadedData, { once: true });
 
-  window.setTimeout(() => {
+  fallbackTimer = window.setTimeout(() => {
     if (video.readyState > HTMLMediaElement.HAVE_NOTHING) {
       sendZero();
     }

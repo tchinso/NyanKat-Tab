@@ -65,12 +65,15 @@ function harness(initialUrl = WATCH_URL) {
 
   return {
     events,
-    setVideo(currentTime) {
+    setVideo(currentTime, readyState = 2) {
+      const listeners = new Map();
       video = {
         currentTime,
-        readyState: 2,
+        readyState,
         focus() {},
-        addEventListener() {},
+        addEventListener(name, callback) { listeners.set(name, callback); },
+        removeEventListener(name, callback) { if (listeners.get(name) === callback) listeners.delete(name); },
+        emit(name) { listeners.get(name)?.(); },
         dispatchEvent(event) { events.push(event.type); }
       };
       return video;
@@ -124,4 +127,37 @@ test("missing video is retried after discovery times out", async () => {
 
   assert.equal(video.currentTime, 0);
   assert.ok(page.events.length > 0);
+});
+
+test("loadeddata resets playback once without restarting it at the fallback timeout", async () => {
+  const page = harness();
+  const video = page.setVideo(40, 0);
+  await page.advance(250);
+  video.readyState = 2;
+  video.emit("loadeddata");
+  await page.advance(400);
+  assert.equal(video.currentTime, 0);
+  const eventCount = page.events.length;
+
+  video.currentTime = 4;
+  await page.advance(5000);
+  assert.equal(video.currentTime, 4);
+  assert.equal(page.events.length, eventCount);
+});
+
+test("the fallback reset also prevents a later loadeddata event from resetting playback again", async () => {
+  const page = harness();
+  const video = page.setVideo(40, 0);
+  await page.advance(250);
+  video.readyState = 1;
+  await page.advance(5250);
+  assert.equal(video.currentTime, 0);
+  const eventCount = page.events.length;
+
+  video.currentTime = 4;
+  video.readyState = 2;
+  video.emit("loadeddata");
+  await page.advance(400);
+  assert.equal(video.currentTime, 4);
+  assert.equal(page.events.length, eventCount);
 });

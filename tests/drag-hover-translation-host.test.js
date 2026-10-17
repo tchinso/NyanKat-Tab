@@ -10,8 +10,9 @@ const script = fs.readFileSync(path.join(__dirname, "..", "drag-hover-translatio
 
 function deferred() {
   let resolve;
-  const promise = new Promise(done => { resolve = done; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 async function settle() {
@@ -49,16 +50,21 @@ function harness(options = {}) {
       state.detectorReady = true;
       state.detectorCreate += 1;
       return Promise.resolve({
-        async detect() { state.detections += 1; return [{ detectedLanguage: options.detectedLanguage || "en", confidence: 0.99 }]; },
+        async detect(input) { state.detections += 1; return [{ detectedLanguage: options.detectLanguage?.(input) || options.detectedLanguage || "en", confidence: 0.99 }]; },
         destroy() {}
       });
     }
   };
   const Translator = {
-    async availability() { return state.translatorReady ? "available" : "downloadable"; },
+    async availability(pair) { return options.translatorAvailability?.(pair) || (state.translatorReady ? "available" : "downloadable"); },
     create(pair) {
-      assert.deepEqual({ ...pair, monitor: undefined }, { sourceLanguage: "en", targetLanguage: "ko", monitor: undefined });
+      assert.equal(pair.targetLanguage, "ko");
+      assert.ok(["en", "ja"].includes(pair.sourceLanguage));
       state.translatorAttempts += 1;
+      if (options.translatorCreation) {
+        const creation = options.translatorCreation(pair);
+        if (creation) return creation;
+      }
       if (!state.translatorReady && !options.allowDelayedCreate && !state.activation) {
         throw new Error("model download needs a fresh click");
       }
@@ -140,4 +146,54 @@ test("a stale translation cannot replace the current selection", async () => {
   wait.resolve("첫 문장");
   await settle();
   assert.equal(h.elements.get("#result").textContent, "둘째 문장");
+});
+
+test("progress and failure from an older model download do not replace a newer translation", async () => {
+  const wait = deferred();
+  let downloadProgress;
+  const h = harness({
+    translated: "새 문장의 번역",
+    detectLanguage: input => input === "Old English sentence" ? "en" : "ja",
+    translatorAvailability: pair => pair.sourceLanguage === "en" ? "downloadable" : "available",
+    translatorCreation(pair) {
+      if (pair.sourceLanguage !== "en") return null;
+      pair.monitor({ addEventListener(_name, callback) { downloadProgress = callback; } });
+      return wait.promise;
+    }
+  });
+  h.translate("Old English sentence");
+  await settle();
+  h.clickPrepare();
+  h.translate("New Japanese sentence");
+  await settle();
+  assert.equal(h.elements.get("#result").textContent, "새 문장의 번역");
+
+  downloadProgress({ loaded: 0.5, total: 1 });
+  assert.equal(h.elements.get("#result").textContent, "새 문장의 번역");
+  wait.reject(new Error("download failed"));
+  await settle();
+  assert.equal(h.elements.get("#result").textContent, "새 문장의 번역");
+  assert.equal(h.elements.get("#prepare").hidden, true);
+});
+
+test("an older failed model download releases preparation for the current selected language", async () => {
+  const wait = deferred();
+  const h = harness({
+    detectLanguage: input => input === "Old English sentence" ? "en" : "ja",
+    translatorAvailability: () => "downloadable",
+    translatorCreation: pair => pair.sourceLanguage === "en" ? wait.promise : null
+  });
+  h.translate("Old English sentence");
+  await settle();
+  h.clickPrepare();
+  h.translate("New Japanese sentence");
+  await settle();
+  assert.equal(h.elements.get("#prepare").disabled, true);
+  wait.reject(new Error("download failed"));
+  await settle();
+  assert.equal(h.elements.get("#prepare").hidden, false);
+  assert.equal(h.elements.get("#prepare").disabled, false);
+  h.clickPrepare();
+  await settle();
+  assert.equal(h.elements.get("#result").textContent, "안녕하세요");
 });

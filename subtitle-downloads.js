@@ -143,7 +143,9 @@
       const cached = await sendFrame(tabId, read.owner, { type: "NYANKAT_DOWNLOAD_READ", url: read.url, allowFetch, parentUrl: read.parentUrl });
       if (signal?.aborted) throw new Error("navigation_changed");
       if (cached && cached.ok && typeof cached.text === "string" && cached.text.length <= MAX_BYTES) {
-        return { text: cached.text, url: read.url, contentType: cached.contentType || "", partial: cached.partial === true };
+        // Relative manifest paths belong to the final response after redirects.
+        return { text: cached.text, url: urlAllowed(cached.responseUrl) ? cached.responseUrl : read.url,
+          contentType: cached.contentType || "", partial: cached.partial === true };
       }
     }
     if (!/^https?:/.test(url)) throw new Error("page_resource_unavailable");

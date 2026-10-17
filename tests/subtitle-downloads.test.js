@@ -277,6 +277,29 @@ test("complete HLS captions fetch every segment in order and remove duplicate bo
   assert.equal(shown.tracks[0].url, track.url);
 });
 
+test("page-cached HLS and DASH manifests resolve segments against the final redirect URL", async t => {
+  for (const kind of ["hls", "dash"]) {
+    const extension = kind === "hls" ? "m3u8" : "mpd";
+    const parent = "https://player.example/captions." + extension;
+    const responseUrl = "https://cdn.example/episode/english/index." + extension;
+    const segment = "https://cdn.example/episode/english/part.vtt";
+    const manifest = kind === "hls" ? "#EXTM3U\n#EXTINF:5,\npart.vtt\n#EXT-X-ENDLIST"
+      : '<MPD mediaPresentationDuration="PT5S"><Period><AdaptationSet mimeType="text/vtt"><Representation id="en"><SegmentTemplate media="part.vtt" duration="5"/></Representation></AdaptationSet></Period></MPD>';
+    const h = await harness({ frameRead: message => message.url === parent
+      ? { ok: true, text: manifest, responseUrl }
+      : message.url === segment ? { ok: true, text: VTT } : null,
+      fetch: async () => { throw new Error("redirected caption must use the page cache"); }
+    });
+    t.after(() => h.close());
+    const track = await h.detect({ url: parent, kind, representationId: kind === "dash" ? "en" : "" });
+    const result = await h.message({ type: "NYANKAT_DOWNLOAD_PREPARE", tabId: 7, id: track.id });
+    assert.equal(result.ok, true, kind);
+    assert.equal(engine.parseCues(result.text, "vtt")[0].text, "Hello 한글");
+    assert.deepEqual(h.frameRequests.map(request => request.message.url), [parent, segment]);
+    assert.equal(h.fetches.length, 0);
+  }
+});
+
 test("live, sliding, encrypted, and binary HLS fail instead of saving incomplete captions", async t => {
   for (const [prefix, suffix, reason] of [
     ["", "", "partial_stream"],

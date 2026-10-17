@@ -301,6 +301,30 @@ test("validated HLS descendants can be fetched without displaying individual seg
   assert.ok(!environment.latest().tracks.some(track => track.url === segment));
 });
 
+test("redirected cached manifests retain their final URL and authorize only its relative segments", async () => {
+  const parent = "https://watch.example/captions/en.m3u8";
+  const responseUrl = "https://cdn.example/episode/english/index.m3u8?token=1";
+  const segment = "https://cdn.example/episode/english/0.vtt";
+  const manifest = "#EXTM3U\n#EXTINF:10,\n0.vtt\n#EXT-X-ENDLIST\n";
+  const requests = [];
+  const environment = createEnvironment({ trackElements: [domTrack(parent)], nativeFetch: async url => {
+    requests.push(url);
+    const response = new Response(url === parent ? manifest : VTT);
+    Object.defineProperty(response, "url", { value: url === parent ? responseUrl : url });
+    return response;
+  } });
+  environment.flushTimers();
+  const fetched = await environment.read(parent, { allowFetch: true });
+  assert.equal(fetched.responseUrl, responseUrl);
+  assert.equal((await environment.read(parent)).responseUrl, responseUrl, "cached reads retain the redirect too");
+  environment.flushTimers();
+  assert.equal((await environment.read("https://watch.example/captions/0.vtt", { parentUrl: parent, allowFetch: true })).ok, false);
+  assert.equal((await environment.read(segment, { parentUrl: parent, allowFetch: true })).text, VTT);
+  assert.deepEqual(requests, [parent, segment]);
+  environment.flushTimers();
+  assert.ok(!environment.latest().tracks.some(track => track.url === segment));
+});
+
 test("SPA route changes clear cached discoveries and late prior-route responses", async () => {
   let releaseResponse;
   const responsePending = new Promise(resolve => { releaseResponse = resolve; });

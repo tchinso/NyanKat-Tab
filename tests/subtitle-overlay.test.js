@@ -83,6 +83,7 @@ async function harness(options = {}) {
   const frames = new Map();
   const fontRequests = [];
   const translationPorts = [];
+  const resizeObservers = [];
   let nextFrame = 1;
   const window = {
     innerWidth: 1600, innerHeight: 1000,
@@ -104,11 +105,16 @@ async function harness(options = {}) {
     storage: { local: { get: async keys => options.read && Array.isArray(keys) ? options.read() : options.saved || {} }, onChanged: event() }
   };
   class Observer { observe() {} disconnect() {} }
+  class ResizeObserver {
+    constructor(callback) { this.callback = callback; this.targets = new Set(); resizeObservers.push(this); }
+    observe(target) { this.targets.add(target); }
+    disconnect() { this.targets.clear(); }
+  }
   const context = vm.createContext({
     window, document, chrome, HTMLVideoElement: Video,
     HTMLMediaElement: { HAVE_NOTHING: 0, HAVE_CURRENT_DATA: 2 },
     Node: { ELEMENT_NODE: 1, DOCUMENT_NODE: 9, DOCUMENT_FRAGMENT_NODE: 11 },
-    MutationObserver: Observer, ResizeObserver: Observer, TextDecoder,
+    MutationObserver: Observer, ResizeObserver, TextDecoder,
     atob: value => Buffer.from(value, "base64").toString("binary")
   });
   vm.runInContext(read("subtitle-style.js"), context);
@@ -124,7 +130,7 @@ async function harness(options = {}) {
     return response;
   }
   return {
-    window, document, video, chrome, message, fontRequests, translationPorts,
+    window, document, video, chrome, message, fontRequests, translationPorts, resizeObservers,
     layer(name) { return document.querySelector(".nyankat-subtitle-" + name); },
     load(settings) {
       return message("NYANKAT_SUBTITLE_LOAD", {
@@ -422,4 +428,74 @@ test("moving an active translated cue into a timing gap clears text and cancels 
   assert.ok(port.messages.some(message => message.type === "cancel" && message.requestId === request.requestId));
   port.onMessage.emit({ type: "done", requestId: request.requestId, text: "취소된 번역" });
   assert.equal(h.layer("fill").textContent, "");
+});
+
+for (const encoding of ["utf16le", "utf16be"]) {
+  for (const text of ["Hello world", "한글 자막"]) {
+    test(`automatic decoding loads BOM-less ${encoding} subtitles containing ${text}`, async () => {
+      const h = await harness();
+      const bytes = Buffer.from("1\n00:00:01,000 --> 00:00:03,000\n" + text, "utf16le");
+      if (encoding === "utf16be") bytes.swap16();
+      const loaded = h.message("NYANKAT_SUBTITLE_LOAD", {
+        filename: "sample.srt", encoding: "auto", b64: bytes.toString("base64")
+      });
+      assert.equal(loaded.ok, true);
+      assert.equal(loaded.count, 1);
+      assert.equal(h.layer("fill").textContent, text);
+    });
+  }
+}
+
+test("unloading releases video listeners and a reload observes the replacement text box", async () => {
+  const h = await harness();
+  h.load();
+  const firstBox = h.layer("text");
+  const firstObserver = h.resizeObservers[0];
+  assert.ok(firstObserver.targets.has(firstBox));
+  h.message("NYANKAT_SUBTITLE_UNLOAD");
+  assert.equal(firstObserver.targets.size, 0, "detached text is no longer retained by ResizeObserver");
+  assert.equal(h.video.listeners.get("timeupdate").length, 0);
+  h.load();
+  const secondBox = h.layer("text");
+  assert.notEqual(firstBox, secondBox);
+  const secondObserver = h.resizeObservers.at(-1);
+  assert.ok(secondObserver.targets.has(secondBox));
+  assert.ok(secondObserver.targets.has(h.video));
+  assert.equal(h.video.listeners.get("timeupdate").length, 1);
+  h.layout();
+  secondBox.offsetHeight = 140;
+  secondObserver.callback();
+  h.layout();
+  assert.equal(secondBox.style.marginTop, "580px", "late font or text resizing repositions the reloaded subtitle");
+});
+
+for (const failure of ["error", "disconnect"]) {
+  test(`a translation ${failure} restores the original cue instead of leaving a partial sentence`, async () => {
+    const h = await harness();
+    loadTranslated(h);
+    const port = h.translationPorts[0];
+    const request = port.messages.find(message => message.type === "translate");
+    port.onMessage.emit({ type: "update", requestId: request.requestId, text: "불완전한" });
+    assert.equal(h.layer("fill").textContent, "불완전한");
+    if (failure === "error") {
+      port.onMessage.emit({ type: "error", requestId: request.requestId, reason: "translation_host_disconnected" });
+    } else {
+      port.onDisconnect.emit();
+    }
+    assert.equal(h.layer("fill").textContent, "Plastic lid\nsecond line");
+    h.chrome.storage.onChanged.emit({ subtitlePostprocessDictionary: { newValue: "불완전한=오래된 번역" } }, "local");
+    assert.equal(h.layer("fill").textContent, "Plastic lid\nsecond line", "dictionary edits cannot resurrect the failed stream");
+    port.onMessage.emit({ type: "done", requestId: request.requestId, text: "오래된 번역" });
+    assert.equal(h.layer("fill").textContent, "Plastic lid\nsecond line");
+  });
+}
+
+test("a disconnect after translation finishes preserves the completed cue", async () => {
+  const h = await harness();
+  loadTranslated(h);
+  const port = h.translationPorts[0];
+  const request = port.messages.find(message => message.type === "translate");
+  port.onMessage.emit({ type: "done", requestId: request.requestId, text: "완성된 번역" });
+  port.onDisconnect.emit();
+  assert.equal(h.layer("fill").textContent, "완성된 번역");
 });

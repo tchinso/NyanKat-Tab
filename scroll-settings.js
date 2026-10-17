@@ -39,6 +39,9 @@ const statusElement = document.querySelector("#status");
 let position = { ...DEFAULT_SCROLL_SETTINGS.position };
 let saveTimer = 0;
 let statusTimer = 0;
+let pendingSettings = {};
+let pendingSites;
+let saveQueue = Promise.resolve();
 
 function normalizeHost(value) {
   return NyanKatScrollSites.normalizeSite(value);
@@ -90,6 +93,7 @@ function normalizeDisabledSites(value) {
 function setStatus(text) {
   window.clearTimeout(statusTimer);
   statusElement.textContent = text;
+  if (text === "저장 실패") return;
   statusTimer = window.setTimeout(() => {
     statusElement.textContent = "저장됨";
   }, 1200);
@@ -112,20 +116,42 @@ function collectSettings() {
   });
 }
 
-function saveSoon() {
+function saveSoon(event) {
+  if (event.target === disabledSitesInput) {
+    pendingSites = normalizeDisabledSites(disabledSitesInput.value);
+  } else {
+    const key = event.target.id;
+    const settings = collectSettings();
+    if (Object.hasOwn(settings, key) && key !== "position") pendingSettings[key] = settings[key];
+  }
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
-    const settings = collectSettings();
-    position = settings.position;
-    chrome.storage.sync.set(
-      {
-        floatingScrollSettings: settings,
-        floatingScrollDisabledSites: normalizeDisabledSites(disabledSitesInput.value)
-      },
-      () => {
-        setStatus(chrome.runtime.lastError ? "저장 실패" : "저장됨");
+    saveQueue = saveQueue.then(async () => {
+      const changedSettings = pendingSettings;
+      const changedSites = pendingSites;
+      pendingSettings = {};
+      pendingSites = undefined;
+      if (!Object.keys(changedSettings).length && changedSites === undefined) return;
+      try {
+        const update = {};
+        if (Object.keys(changedSettings).length) {
+          // The page can stay open while position mode or another settings page
+          // changes storage. Merge only edited controls into the latest values.
+          const stored = await chrome.storage.sync.get({ floatingScrollSettings: DEFAULT_SCROLL_SETTINGS });
+          update.floatingScrollSettings = {
+            ...normalizeScrollSettings(stored.floatingScrollSettings), ...changedSettings
+          };
+        }
+        if (changedSites !== undefined) update.floatingScrollDisabledSites = changedSites;
+        await chrome.storage.sync.set(update);
+        setStatus("저장됨");
+      } catch {
+        // Retain failed edits for the next attempt without replacing newer input.
+        pendingSettings = { ...changedSettings, ...pendingSettings };
+        if (pendingSites === undefined) pendingSites = changedSites;
+        setStatus("저장 실패");
       }
-    );
+    });
   }, 200);
 }
 
@@ -141,9 +167,9 @@ function render(settings, disabledSites) {
   setControlsEnabled(normalizedSettings.enabled);
 }
 
-enabledInput.addEventListener("change", () => {
+enabledInput.addEventListener("change", (event) => {
   setControlsEnabled(enabledInput.checked);
-  saveSoon();
+  saveSoon(event);
 });
 scrollControls.addEventListener("input", saveSoon);
 scrollControls.addEventListener("change", saveSoon);

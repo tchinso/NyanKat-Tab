@@ -167,6 +167,18 @@
 
     stopCueUpdates(record);
     disconnectTranslation(record);
+    unbindOverlayEvents(record);
+    if (record.overlay) {
+      record.overlay.remove();
+      record.overlay = null;
+      record.textBox = null;
+      record.textLayers = null;
+    }
+    recordsByVideo.delete(record.video);
+    recordsById.delete(record.id);
+  }
+
+  function unbindOverlayEvents(record) {
     if (record.resizeObserver) {
       record.resizeObserver.disconnect();
       record.resizeObserver = null;
@@ -177,14 +189,6 @@
       }
       record.mediaHandlers = null;
     }
-    if (record.overlay) {
-      record.overlay.remove();
-      record.overlay = null;
-      record.textBox = null;
-      record.textLayers = null;
-    }
-    recordsByVideo.delete(record.video);
-    recordsById.delete(record.id);
   }
 
   function getRecord(videoId) {
@@ -328,6 +332,7 @@
       return false;
     }
 
+    unbindOverlayEvents(record);
     const overlay = document.createElement("div");
     const textBox = document.createElement("div");
     const glyphs = document.createElement("div");
@@ -651,11 +656,17 @@
           if (message.type === "done") record.translationRequest = "";
         } else if (message.type === "error") {
           record.translationStatus = { state: "error", code: message.reason };
+          record.rawTranslatedText = null;
+          setCueText(record, record.cues[record.currentCueIndex]?.text || "");
           record.translationRequest = "";
         }
       });
       port.onDisconnect.addListener(() => {
         if (record.translationPort !== port) return;
+        if (record.translationRequest) {
+          record.rawTranslatedText = null;
+          setCueText(record, record.cues[record.currentCueIndex]?.text || "");
+        }
         record.translationPort = null;
         record.prefetchStartIndex = -1;
         record.translationRequest = "";
@@ -806,26 +817,30 @@
       }
     }
 
+    // ASCII timing syntax in BOM-less UTF-16 is also valid UTF-8 with NULs.
+    // Check its byte order before UTF-8, using the prefix rather than allowing
+    // a long non-ASCII cue to drown out the subtitle's timing/header syntax.
+    const sampleLength = Math.min(bytes.length, 4096);
+    let evenZeros = 0;
+    let oddZeros = 0;
+    for (let index = 0; index + 1 < sampleLength; index += 2) {
+      if (bytes[index] === 0) evenZeros += 1;
+      if (bytes[index + 1] === 0) oddZeros += 1;
+    }
+    const utf16Encoding = oddZeros > sampleLength / 8 && oddZeros > evenZeros * 2 ? "utf-16le"
+      : evenZeros > sampleLength / 8 && evenZeros > oddZeros * 2 ? "utf-16be" : null;
+    if (utf16Encoding) {
+      try {
+        return new TextDecoder(utf16Encoding, { fatal: true }).decode(bytes);
+      } catch {
+        // Invalid UTF-16 should still get the normal encoding fallbacks.
+      }
+    }
+
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch {
-      // UTF-8 did not validate; try UTF-16 and Korean encodings below.
-    }
-
-    let zeroPairs = 0;
-    for (let index = 0; index + 1 < bytes.length; index += 2) {
-      if (bytes[index] === 0 || bytes[index + 1] === 0) {
-        zeroPairs += 1;
-      }
-    }
-    if (zeroPairs > bytes.length / 8) {
-      for (const encoding of ["utf-16le", "utf-16be"]) {
-        try {
-          return new TextDecoder(encoding).decode(bytes);
-        } catch {
-          // Try the next encoding.
-        }
-      }
+      // UTF-8 did not validate; try Korean and Western encodings below.
     }
 
     for (const encoding of ["euc-kr", "windows-1252"]) {
@@ -883,6 +898,7 @@
   function unloadSubtitle(record) {
     stopCueUpdates(record);
     disconnectTranslation(record);
+    unbindOverlayEvents(record);
     record.cues = [];
     record.cueEndPrefixes = [];
     record.currentCueIndex = -1;

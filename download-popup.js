@@ -8,6 +8,7 @@
   let tabId = null;
   let timer = 0;
   let revision = 0;
+  let listRevision = 0;
   let signature = "";
   let busy = false;
   const reasons = {
@@ -154,8 +155,9 @@
   async function update() {
     if (tabId === null || busy) return;
     const version = revision;
+    const listVersion = ++listRevision;
     const response = await request("NYANKAT_DOWNLOAD_LIST");
-    if (version !== revision) return;
+    if (version !== revision || listVersion !== listRevision || busy) return;
     if (response?.ok) render(response.tracks || []);
   }
 
@@ -170,9 +172,15 @@
       signature = "";
       if (tabId === null) { status.textContent = "현재 탭을 찾지 못했습니다."; return; }
       if (rescan) await request("NYANKAT_DOWNLOAD_RESCAN");
+      if (version !== revision) return;
       await update();
+      if (version !== revision) return;
       timer = setInterval(() => { void update(); }, 1500);
-    } finally { refresh.disabled = false; }
+    } catch {
+      if (version === revision) status.textContent = "현재 탭의 자막 상태를 불러오지 못했습니다. 다시 시도해 보세요.";
+    } finally {
+      if (version === revision) refresh.disabled = false;
+    }
   }
 
   refresh.addEventListener("click", () => { status.textContent = "자막을 다시 검색하고 있습니다."; void start(); });
@@ -180,5 +188,5 @@
     if (event.detail?.tabName === "download") { status.textContent = ""; void start(); }
     else { clearInterval(timer); revision += 1; }
   });
-  window.addEventListener("pagehide", () => { clearInterval(timer); });
+  window.addEventListener("pagehide", () => { clearInterval(timer); revision += 1; });
 })();

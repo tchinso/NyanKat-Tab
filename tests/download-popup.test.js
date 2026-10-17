@@ -52,6 +52,8 @@ async function harness(options = {}) {
   document.createElement = tag => new Element(tag);
   const requests = [];
   const imports = [];
+  const intervals = new Map();
+  let nextIntervalId = 1;
   const window = new Element("window");
   window.NyanKatSubtitleExtractor = extractor;
   window.NyanKatSubtitlePopup = {
@@ -64,21 +66,66 @@ async function harness(options = {}) {
     runtime: {
       async sendMessage(message) {
         requests.push(message);
-        if (message.type === "NYANKAT_DOWNLOAD_LIST") return { ok: true, tracks: options.tracks || [TRACK] };
+        if (message.type === "NYANKAT_DOWNLOAD_LIST") return options.list ? options.list(message) : { ok: true, tracks: options.tracks || [TRACK] };
+        if (message.type === "NYANKAT_DOWNLOAD_RESCAN" && options.rescan) return options.rescan(message);
         if (message.type === "NYANKAT_DOWNLOAD_PREPARE") {
           return options.prepare ? options.prepare(message) : { ok: true, text: TEXT, format: "vtt", filename: "English.vtt", partial: !!options.partial };
         }
         return { ok: true };
       }
     },
-    tabs: { query: async () => [{ id: 7 }] }
+    tabs: { query: async () => options.query ? options.query() : [{ id: 7 }] }
   };
-  vm.runInNewContext(source, { document, window, chrome, URL, File, setInterval: () => 1, clearInterval() {} });
+  vm.runInNewContext(source, {
+    document, window, chrome, URL, File,
+    setInterval(callback) { const id = nextIntervalId++; intervals.set(id, callback); return id; },
+    clearInterval(id) { intervals.delete(id); }
+  });
   document.emit("nyankat-popup-tab-shown", { tabName: "download" });
   await settle();
-  const actions = elements.downloadTracks.children[0].children[1];
-  return { requests, imports, elements, window, translate: actions.children[0], download: actions.children[1] };
+  const actions = elements.downloadTracks.children[0]?.children[1];
+  return { requests, imports, elements, window, document, intervals, translate: actions?.children[0], download: actions?.children[1] };
 }
+
+test("leaving the download tab during a rescan does not restart hidden polling", async () => {
+  let finishRescan;
+  let scans = 0;
+  const h = await harness({ rescan: () => ++scans === 1 ? { ok: true } : new Promise(resolve => { finishRescan = resolve; }) });
+  assert.equal(h.intervals.size, 1);
+  h.elements.refreshDownloads.emit("click");
+  await settle();
+  h.document.emit("nyankat-popup-tab-shown", { tabName: "subtitle" });
+  const listCount = h.requests.filter(request => request.type === "NYANKAT_DOWNLOAD_LIST").length;
+  finishRescan({ ok: true });
+  await settle();
+  assert.equal(h.intervals.size, 0);
+  assert.equal(h.requests.filter(request => request.type === "NYANKAT_DOWNLOAD_LIST").length, listCount);
+});
+
+test("an older polling response cannot replace newer track discovery", async () => {
+  let finishOldList;
+  let lists = 0;
+  const h = await harness({ list: () => {
+    lists += 1;
+    if (lists === 2) return new Promise(resolve => { finishOldList = resolve; });
+    return { ok: true, tracks: [{ ...TRACK, label: lists === 1 ? "Initial" : "Newest" }] };
+  } });
+  const poll = [...h.intervals.values()][0];
+  poll();
+  await settle();
+  poll();
+  await settle();
+  finishOldList({ ok: true, tracks: [{ ...TRACK, label: "Older" }] });
+  await settle();
+  assert.equal(h.elements.downloadTracks.children[0].children[0].children[0].textContent, "Newest · en");
+});
+
+test("tab lookup failure is reported and releases the refresh button", async () => {
+  const h = await harness({ query: () => { throw new Error("tab closed"); } });
+  assert.match(h.elements.downloadStatus.textContent, /불러오지 못했습니다/);
+  assert.equal(h.elements.refreshDownloads.disabled, false);
+  assert.equal(h.intervals.size, 0);
+});
 
 test("translation appears to the left of download and imports a UTF-8 local file without saving to disk", async () => {
   const h = await harness();

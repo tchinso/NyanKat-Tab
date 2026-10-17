@@ -74,7 +74,7 @@
 
   function parseSrt(text) {
     const cues = [];
-    const blocks = String(text || "").replace(/^\uFEFF/, "").replace(/\r/g, "").split(/\n{2,}/);
+    const blocks = String(text || "").replace(/^\uFEFF/, "").replace(/\r/g, "").split(/\n[\t ]*\n+/);
 
     for (const block of blocks) {
       const lines = block.trim().split("\n");
