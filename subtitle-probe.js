@@ -3,6 +3,14 @@
 // Runs in the page's MAIN world. It only observes existing caption traffic;
 // downloading a resource is an explicit extension action handled elsewhere.
 (() => {
+  // Turnstile challenge frames perform their own CSP/network feature checks.
+  // They cannot contain a player's captions, and wrapping fetch there makes
+  // native challenge failures appear to originate from this extension.
+  try {
+    const hostname = new URL(location.href).hostname.toLowerCase();
+    if (hostname === "challenges.cloudflare.com" || hostname.endsWith(".challenges.cloudflare.com")) return;
+  } catch (_) { /* Unusual document URLs keep the normal passive probe. */ }
+
   const engine = globalThis.NyanKatSubtitleExtractor;
   if (!engine || globalThis.__nyankatSoftSubProbeInstalled) return;
   globalThis.__nyankatSoftSubProbeInstalled = true;

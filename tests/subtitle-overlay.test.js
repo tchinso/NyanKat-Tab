@@ -230,6 +230,55 @@ test("an earlier long cue remains visible after shorter overlapping cues end", a
   assert.equal(h.layer("fill").textContent, "Long cue");
 });
 
+test("sync rate scales subtitle time after the signed offset and updates active cues immediately", async () => {
+  const h = await harness();
+  h.video.currentTime = 11;
+  const loaded = h.message("NYANKAT_SUBTITLE_LOAD", {
+    filename: "sync.srt", encoding: "utf-8", offsetMs: 1000, syncRate: 0.96,
+    b64: Buffer.from([
+      "1", "00:00:09,590 --> 00:00:09,610", "Delayed and scaled", "",
+      "2", "00:00:10,400 --> 00:00:10,430", "FPS correction", "",
+      "3", "00:00:12,490 --> 00:00:12,510", "Advanced and scaled"
+    ].join("\n")).toString("base64")
+  });
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.state.syncRate, 0.96);
+  assert.equal(loaded.state.offsetMs, 1000);
+  assert.equal(h.layer("fill").textContent, "Delayed and scaled", "(11 - 1) * 0.96 = 9.6");
+  const adjusted = h.message("NYANKAT_SUBTITLE_SET_SYNC_RATE", { syncRate: 1.04167 });
+  assert.equal(adjusted.state.syncRate, 1.04167);
+  assert.equal(h.layer("fill").textContent, "FPS correction", "(11 - 1) * 1.04167 = 10.4167");
+  h.message("NYANKAT_SUBTITLE_SET_OFFSET", { offsetMs: -1000 });
+  assert.equal(h.layer("fill").textContent, "Advanced and scaled", "negative offsets still advance subtitle time");
+  h.video.currentTime = 11.1;
+  h.video.emit("timeupdate");
+  assert.equal(h.layer("fill").textContent, "");
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.syncRate, 1.04167);
+});
+
+test("sync rate defaults, bounded updates and atomic adjustments round-trip per video", async () => {
+  const h = await harness();
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.syncRate, 1);
+  assert.equal(h.load().state.syncRate, 1);
+  const set = syncRate => h.message("NYANKAT_SUBTITLE_SET_SYNC_RATE", { syncRate }).state.syncRate;
+  assert.equal(set("0.95905"), 0.95905);
+  for (const invalid of [undefined, null, "", 0, -1, "invalid", NaN, Infinity, -Infinity]) {
+    assert.equal(set(invalid), 0.95905, `invalid rate ${String(invalid)} retains the active rate`);
+  }
+  const adjust = deltaRate => h.message("NYANKAT_SUBTITLE_ADJUST_SYNC_RATE", { deltaRate }).state.syncRate;
+  assert.equal(adjust(0.0001), 0.95915);
+  assert.equal(adjust(-0.001), 0.95815);
+  assert.equal(adjust("invalid"), 0.95815);
+  assert.equal(set(100), 10);
+  assert.equal(set(0.01), 0.1);
+  assert.equal(adjust(-0.001), 0.1);
+  const second = new Video();
+  h.document.documentElement.append(second);
+  h.message("NYANKAT_SUBTITLE_PING");
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS", { videoId: "video-2" }).state.syncRate, 1);
+  assert.equal(h.load().state.syncRate, 1, "a new file without a rate starts at normal subtitle speed");
+});
+
 test("font warming follows changed fonts and storage changes update existing and newly found videos", async () => {
   const h = await harness({ saved: { subtitleStyle: customStyle } });
   assert.deepEqual(plain(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.settings), customStyle);
@@ -356,6 +405,38 @@ test("subtitle playback queues the next five cues for translation, including aft
   h.message("NYANKAT_SUBTITLE_SET_LANGUAGE", { sourceLanguage: "ko" });
   assert.equal(h.translationPorts[0].disconnected, true);
   assert.equal(h.translationPorts.length, 1, "Korean subtitles do not start prefetching");
+});
+
+test("translation and five-cue lookahead follow scaled subtitle time and discard pre-change replies", async () => {
+  const h = await harness();
+  h.video.currentTime = 6;
+  const cues = Array.from({ length: 8 }, (_, index) =>
+    `${index + 1}\n00:00:${String(index * 4 + 1).padStart(2, "0")},000 --> 00:00:${String(index * 4 + 3).padStart(2, "0")},000\nLine ${index + 1}`
+  ).join("\n\n");
+  h.message("NYANKAT_SUBTITLE_LOAD", {
+    sourceLanguage: "en", filename: "scaled.srt", encoding: "utf-8", offsetMs: 1000, syncRate: 2,
+    b64: Buffer.from(cues).toString("base64")
+  });
+  const port = h.translationPorts[0];
+  const first = port.messages.find(message => message.type === "translate");
+  assert.equal(first.text, "Line 3", "translation starts at subtitle time (6 - 1) * 2 = 10");
+  assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
+    ["Line 4", "Line 5", "Line 6", "Line 7", "Line 8"]);
+  h.message("NYANKAT_SUBTITLE_SET_SYNC_RATE", { syncRate: 1 });
+  const second = port.messages.filter(message => message.type === "translate").at(-1);
+  assert.equal(second.text, "Line 2");
+  assert.ok(port.messages.some(message => message.type === "cancel" && message.requestId === first.requestId));
+  port.onMessage.emit({ type: "done", requestId: first.requestId, text: "오래된 배속의 번역" });
+  assert.equal(h.layer("fill").textContent, "Line 2");
+  assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
+    ["Line 3", "Line 4", "Line 5", "Line 6", "Line 7"]);
+  h.video.currentTime = 9;
+  h.video.emit("seeked");
+  assert.equal(h.layer("fill").textContent, "");
+  h.message("NYANKAT_SUBTITLE_SET_SYNC_RATE", { syncRate: 2 });
+  assert.equal(h.layer("fill").textContent, "");
+  assert.deepEqual(port.messages.filter(message => message.type === "prefetch").at(-1).texts,
+    ["Line 5", "Line 6", "Line 7", "Line 8"], "rate changes refresh lookahead even between two subtitle gaps");
 });
 
 test("the five future cues advance while an overlapping long cue remains visible", async () => {

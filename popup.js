@@ -14,15 +14,18 @@ const checkboxControls = {
 
 const statusElement = document.querySelector("#status");
 const openScrollSettingsButton = document.querySelector("#openScrollSettings");
-const openScrollPositionModeButton = document.querySelector("#openScrollPositionMode");
 const openKioDownloadButton = document.querySelector("#openKioDownload");
 const openLinkPreviewSettingsButton = document.querySelector("#openLinkPreviewSettings");
 const openDragHoverTranslationSettingsButton = document.querySelector("#openDragHoverTranslationSettings");
-const tabButtons = Array.from(document.querySelectorAll("[role='tab']"));
-const tabPanels = Array.from(document.querySelectorAll("[role='tabpanel']"));
+const tabButtons = Array.from(document.querySelectorAll("#settingsTabs [role='tab']"));
+const subtitleTabButtons = Array.from(document.querySelectorAll("#subtitleTabs [role='tab']"));
+const tabPanels = tabButtons.map(button => document.querySelector("#" + button.getAttribute("aria-controls")));
+const subtitleTabPanels = subtitleTabButtons.map(button => document.querySelector("#" + button.getAttribute("aria-controls")));
+const subtitleViews = ["overlay", "style", "extract"];
 const savedCheckboxValues = {};
 let statusTimer = 0;
-let currentTab = "basic";
+let currentSubtitleView = "overlay";
+let tabRevision = 0;
 const loadedScripts = new Map();
 let subtitleScriptsReady;
 let downloadScriptsReady;
@@ -95,34 +98,51 @@ function saveSetting(key, value) {
   });
 }
 
-function showTab(tabName) {
-  currentTab = tabName;
-  for (const button of tabButtons) {
-    const selected = button.id === tabName + "Tab";
+function selectTabGroup(buttons, panels, selectedIndex) {
+  buttons.forEach((button, index) => {
+    const selected = index === selectedIndex;
     button.setAttribute("aria-selected", String(selected));
     button.tabIndex = selected ? 0 : -1;
-  }
-  for (const panel of tabPanels) {
-    panel.hidden = panel.id !== tabName + "Panel";
-  }
+    panels[index].hidden = !selected;
+  });
+}
 
-  const ready = tabName === "download" ? ensureDownloadScripts()
+function showTab(tabName, subtitleView) {
+  if (tabName === "download") {
+    tabName = "subtitle";
+    subtitleView = "extract";
+  }
+  if (tabName !== "basic" && tabName !== "subtitle") return;
+  if (subtitleViews.includes(subtitleView)) currentSubtitleView = subtitleView;
+  const revision = ++tabRevision;
+  selectTabGroup(tabButtons, tabPanels, tabButtons.findIndex(button => button.id === tabName + "Tab"));
+  selectTabGroup(subtitleTabButtons, subtitleTabPanels, subtitleViews.indexOf(currentSubtitleView));
+  const viewName = tabName === "basic" ? "basic"
+    : currentSubtitleView === "extract" ? "download"
+    : currentSubtitleView === "style" ? "style" : "subtitle";
+  const detail = { tabName: viewName, subtitleView: currentSubtitleView };
+  document.dispatchEvent(new CustomEvent("nyankat-popup-tab-changing", { detail }));
+  const subtitleStatus = document.querySelector("#subtitleStatus");
+  subtitleStatus.hidden = tabName !== "subtitle" || currentSubtitleView === "extract";
+  const ready = viewName === "download" ? ensureDownloadScripts()
     : tabName === "subtitle" ? ensureSubtitleScripts() : Promise.resolve();
   void ready.then(() => {
-    if (currentTab === tabName) {
-      document.dispatchEvent(new CustomEvent("nyankat-popup-tab-shown", {
-        detail: { tabName }
-      }));
+    if (tabRevision === revision) {
+      document.dispatchEvent(new CustomEvent("nyankat-popup-tab-shown", { detail }));
     }
   }).catch(() => {
-    const status = document.querySelector(tabName === "download" ? "#downloadStatus" : "#subtitleStatus");
-    if (status && currentTab === tabName) {
+    const status = document.querySelector(viewName === "download" ? "#downloadStatus" : "#subtitleStatus");
+    if (status && tabRevision === revision) {
       status.textContent = "탭을 불러오지 못했습니다. 다른 탭으로 이동한 뒤 다시 시도하세요.";
     }
   });
 }
 
-window.NyanKatPopup = { showTab };
+function showSubtitleSubtab(view) {
+  showTab("subtitle", view);
+}
+
+window.NyanKatPopup = { showTab, showSubtitleSubtab };
 
 function getActiveTab() {
   return new Promise((resolve) => {
@@ -136,27 +156,6 @@ function getActiveTab() {
   });
 }
 
-function enableScrollPositionMode() {
-  getActiveTab().then((tab) => {
-    if (!tab || typeof tab.id !== "number") {
-      setStatus("현재 탭을 찾지 못했습니다");
-      return;
-    }
-
-    chrome.tabs.sendMessage(
-      tab.id,
-      { type: "NYANKAT_FLOATING_SCROLL_SET_POSITION_MODE", enabled: true },
-      (response) => {
-        if (chrome.runtime.lastError || !response || !response.ok) {
-          setStatus("이 페이지에서는 위치를 조정할 수 없습니다");
-          return;
-        }
-        setStatus("페이지에서 버튼을 드래그한 뒤 ‘완료’를 누르세요");
-      }
-    );
-  });
-}
-
 chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
   for (const [key, control] of Object.entries(checkboxControls)) {
     control.checked = settings[key] === undefined ? DEFAULT_SETTINGS[key] : Boolean(settings[key]);
@@ -167,28 +166,30 @@ chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
   }
 });
 
-for (const button of tabButtons) {
-  button.addEventListener("click", () => {
-    showTab(button.id.replace(/Tab$/, ""));
-  });
-  button.addEventListener("keydown", (event) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-      return;
-    }
-
-    const currentIndex = tabButtons.indexOf(button);
-    const nextIndex = (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + tabButtons.length) % tabButtons.length;
-    const nextButton = tabButtons[nextIndex];
-    nextButton.focus();
-    showTab(nextButton.id.replace(/Tab$/, ""));
-  });
+function bindTabGroup(buttons, select) {
+  for (const button of buttons) {
+    button.addEventListener("click", () => select(buttons.indexOf(button)));
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        return;
+      }
+      event.preventDefault();
+      const currentIndex = buttons.indexOf(button);
+      const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+      const nextButton = buttons[nextIndex];
+      nextButton.focus();
+      select(nextIndex);
+    });
+  }
 }
+
+bindTabGroup(tabButtons, index => showTab(tabButtons[index].id.replace(/Tab$/, "")));
+bindTabGroup(subtitleTabButtons, index => showSubtitleSubtab(subtitleViews[index]));
 
 openScrollSettingsButton.addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
 });
-
-openScrollPositionModeButton.addEventListener("click", enableScrollPositionMode);
 
 openKioDownloadButton.addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("kiodownload.html") });

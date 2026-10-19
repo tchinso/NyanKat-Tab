@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS = {
   enableKoneBase64AutoDecode: true,
   floatingScrollSettings: {
     enabled: true,
+    showPositionHandle: false,
     downSpeed: 7.5,
     fastDownSpeed: 45,
     buttonSize: 72,

@@ -79,7 +79,7 @@
       if (imported === false || imported?.ok === false) throw new Error(imported?.reason || "import_failed");
       status.textContent = response.partial
         ? "현재 플레이어에 로드된 자막 구간을 불러왔습니다. 전체 자막과 다를 수 있습니다."
-        : "자막 파일을 불러왔습니다. 자막 탭에서 영어 → 한국어 번역을 사용할 수 있습니다.";
+        : "자막 파일을 불러왔습니다. 자막 → 오버레이에서 영어 → 한국어 번역을 사용할 수 있습니다.";
     } catch (error) {
       status.textContent = reasons[error?.message] || "추출한 자막을 자막 파일로 불러오지 못했습니다. 다시 시도해 보세요.";
     } finally {
@@ -184,6 +184,11 @@
   }
 
   refresh.addEventListener("click", () => { status.textContent = "자막을 다시 검색하고 있습니다."; void start(); });
+  document.addEventListener("nyankat-popup-tab-changing", () => {
+    clearInterval(timer);
+    revision += 1;
+    refresh.disabled = false;
+  });
   document.addEventListener("nyankat-popup-tab-shown", (event) => {
     if (event.detail?.tabName === "download") { status.textContent = ""; void start(); }
     else { clearInterval(timer); revision += 1; }

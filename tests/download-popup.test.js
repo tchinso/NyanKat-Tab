@@ -120,6 +120,14 @@ test("an older polling response cannot replace newer track discovery", async () 
   assert.equal(h.elements.downloadTracks.children[0].children[0].children[0].textContent, "Newest · en");
 });
 
+test("changing subtitle subtab stops extraction polling before the next view finishes loading", async () => {
+  const h = await harness();
+  assert.equal(h.intervals.size, 1);
+  h.document.emit("nyankat-popup-tab-changing", { tabName: "style" });
+  assert.equal(h.intervals.size, 0);
+  assert.equal(h.elements.refreshDownloads.disabled, false);
+});
+
 test("tab lookup failure is reported and releases the refresh button", async () => {
   const h = await harness({ query: () => { throw new Error("tab closed"); } });
   assert.match(h.elements.downloadStatus.textContent, /불러오지 못했습니다/);

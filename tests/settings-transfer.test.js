@@ -103,6 +103,20 @@ test("import preserves the receiving PC font while applying other subtitle style
   assert.equal(destination.sync.enableDragHoverTranslation, false);
 });
 
+test("position handle visibility transfers and older backups default to hidden", async () => {
+  const source = harness({ floatingScrollSettings: { enabled: true, showPositionHandle: true } });
+  const file = await source.transfer.buildExport();
+  assert.equal(file.sync.floatingScrollSettings.showPositionHandle, true);
+  const destination = harness();
+  await destination.transfer.applyImport(destination.transfer.parseImport(JSON.stringify(file)));
+  assert.equal(destination.sync.floatingScrollSettings.showPositionHandle, true);
+  delete file.sync.floatingScrollSettings.showPositionHandle;
+  const legacy = destination.transfer.parseImport(JSON.stringify(file));
+  assert.equal(legacy.sync.floatingScrollSettings.showPositionHandle, false);
+  file.sync.floatingScrollSettings.showPositionHandle = "true";
+  assert.throws(() => destination.transfer.parseImport(JSON.stringify(file)), /위치 조정 버튼 표시/);
+});
+
 test("bundled subtitle fonts can travel with a settings file", async () => {
   const source = harness();
   const bundled = source.style.fontValue(source.style.FONT_GROUPS[0].fonts[0].family);

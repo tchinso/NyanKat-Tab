@@ -10,6 +10,8 @@
   const subtitleStyle = window.NyanKatSubtitleStyle;
   const { DEFAULT_STYLE, normalizeStyle } = subtitleStyle;
   const MAX_OFFSET_MS = 60 * 60 * 1000;
+  const MIN_SYNC_RATE = 0.1;
+  const MAX_SYNC_RATE = 10;
   const PREFETCH_CUES = 5;
   const recordsById = new Map();
   const recordsByVideo = new WeakMap();
@@ -32,6 +34,13 @@
     }
 
     return Math.min(max, Math.max(min, numberValue));
+  }
+
+  function normalizeSyncRate(value, fallback = 1) {
+    const rate = Number(value);
+    return Number.isFinite(rate) && rate > 0
+      ? Math.min(MAX_SYNC_RATE, Math.max(MIN_SYNC_RATE, rate))
+      : fallback;
   }
 
   function normalizeColor(value, fallback) {
@@ -139,6 +148,7 @@
       currentCueIndex: -1,
       prefetchStartIndex: -1,
       offsetMs: 0,
+      syncRate: 1,
       settings: { ...savedStyle },
       styleTouched: false,
       requestedFont: "",
@@ -557,7 +567,7 @@
       return;
     }
 
-    const time = (Number(record.video.currentTime) || 0) - record.offsetMs / 1000;
+    const time = ((Number(record.video.currentTime) || 0) - record.offsetMs / 1000) * record.syncRate;
     const cueIndex = findCueIndex(record.cues, record.cueEndPrefixes, time);
     const prefetchStart = Math.max(cueIndex + 1, firstCueAfter(record.cues, time));
     const cueChanged = cueIndex !== record.currentCueIndex;
@@ -785,12 +795,20 @@
     return record.offsetMs;
   }
 
+  function updateSyncRate(record, syncRate) {
+    record.syncRate = normalizeSyncRate(syncRate, record.syncRate);
+    record.currentCueIndex = -2;
+    renderCue(record);
+    return record.syncRate;
+  }
+
   function getState(record) {
     return {
       id: record.id,
       loaded: record.cues.length > 0,
       cueCount: record.cues.length,
       offsetMs: record.offsetMs,
+      syncRate: record.syncRate,
       sourceLanguage: record.sourceLanguage,
       translationStatus: record.translationStatus,
       settings: { ...record.settings }
@@ -888,6 +906,7 @@
     disconnectTranslation(record);
     record.sourceLanguage = window.NyanKatSubtitleTranslation?.normalizeLanguage(payload.sourceLanguage) || "ko";
     record.currentCueIndex = -2;
+    record.syncRate = normalizeSyncRate(payload.syncRate);
     updateOffset(record, payload.offsetMs);
     updateStyle(record, payload.settings);
     renderCue(record);
@@ -975,6 +994,18 @@
 
     if (message.type === "NYANKAT_SUBTITLE_SET_OFFSET") {
       updateOffset(record, payload.offsetMs);
+      sendResponse({ ok: true, state: getState(record) });
+      return;
+    }
+
+    if (message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE") {
+      updateSyncRate(record, payload.syncRate);
+      sendResponse({ ok: true, state: getState(record) });
+      return;
+    }
+
+    if (message.type === "NYANKAT_SUBTITLE_ADJUST_SYNC_RATE") {
+      updateSyncRate(record, Math.round((record.syncRate + Number(payload.deltaRate || 0)) * 1e6) / 1e6);
       sendResponse({ ok: true, state: getState(record) });
       return;
     }

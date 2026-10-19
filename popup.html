@@ -15,20 +15,15 @@
       </div>
     </header>
 
-    <nav class="tab-list" role="tablist" aria-label="설정 탭">
+    <nav id="settingsTabs" class="tab-list" role="tablist" aria-label="설정 탭">
       <button id="basicTab" class="tab-button" type="button" role="tab" aria-selected="true" aria-controls="basicPanel">기본</button>
-      <button id="subtitleTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="subtitlePanel">자막</button>
-      <button id="downloadTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="downloadPanel">자막추출</button>
+      <button id="subtitleTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="subtitlePanel" tabindex="-1">자막</button>
     </nav>
 
     <main>
       <section id="basicPanel" class="tab-panel" role="tabpanel" aria-labelledby="basicTab">
-        <button id="openScrollPositionMode" class="link-button" type="button">
-          스크롤 버튼 위치 조정 모드 시작
-        </button>
-
         <button id="openDragHoverTranslationSettings" class="link-button" type="button">
-          드래그하여 번역 사용
+          드래그 하여 번역 사용
         </button>
 
         <button id="openKioDownload" class="link-button" type="button">
@@ -73,6 +68,13 @@
       </section>
 
       <section id="subtitlePanel" class="tab-panel subtitle-panel" role="tabpanel" aria-labelledby="subtitleTab" hidden>
+        <nav id="subtitleTabs" class="tab-list subtitle-tab-list" role="tablist" aria-label="자막 설정 탭">
+          <button id="overlaySubtitleTab" class="tab-button" type="button" role="tab" aria-selected="true" aria-controls="overlaySubtitlePanel">오버레이</button>
+          <button id="styleSubtitleTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="styleSubtitlePanel" tabindex="-1">스타일</button>
+          <button id="extractSubtitleTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="downloadPanel" tabindex="-1">추출·검색</button>
+        </nav>
+
+        <section id="overlaySubtitlePanel" class="subtitle-subpanel" role="tabpanel" aria-labelledby="overlaySubtitleTab">
         <div class="subtitle-heading">
           <h2>자막 오버레이</h2>
           <p>현재 페이지와 iframe에서 찾은 동영상에 로컬 자막을 겹쳐 표시합니다.</p>
@@ -142,13 +144,38 @@
           </div>
         </div>
 
+        <div class="subtitle-row sync-row">
+          <label for="subtitleSyncRate">자막 배속</label>
+          <div class="sync-controls">
+            <input id="subtitleSyncRate" type="number" value="1.000000" min="0.1" max="10" step="0.00001" aria-describedby="syncRateHint">
+            <div class="sync-buttons rate-buttons" aria-label="자막 배속 조정">
+              <button type="button" data-rate-adjust="-0.001">−0.001</button>
+              <button type="button" data-rate-adjust="-0.0001">−0.0001</button>
+              <button type="button" data-rate-adjust="0.0001">+0.0001</button>
+              <button type="button" data-rate-adjust="0.001">+0.001</button>
+              <button type="button" data-rate-preset="1">초기화</button>
+            </div>
+            <span class="sync-preset-label">FPS 프리셋</span>
+            <div class="sync-buttons fps-presets" aria-label="자막 FPS 프리셋">
+              <button type="button" data-rate-preset="0.95905">0.95905</button>
+              <button type="button" data-rate-preset="0.96000">0.96000</button>
+              <button type="button" data-rate-preset="0.99900">0.99900</button>
+              <button type="button" data-rate-preset="1.00100">1.00100</button>
+              <button type="button" data-rate-preset="1.04167">1.04167</button>
+              <button type="button" data-rate-preset="1.04271">1.04271</button>
+            </div>
+            <small id="syncRateHint">자막 시간 = (영상 시간 − 싱크 ms ÷ 1000) × 배속</small>
+          </div>
+        </div>
+
         <div class="subtitle-actions">
           <button id="loadSubtitle" class="primary-button" type="button">자막 적용</button>
           <button id="unloadSubtitle" type="button">자막 제거</button>
         </div>
 
-        <hr>
+        </section>
 
+        <section id="styleSubtitlePanel" class="subtitle-subpanel" role="tabpanel" aria-labelledby="styleSubtitleTab" hidden>
         <div class="subtitle-heading">
           <h3>표시 스타일</h3>
           <p>모든 스타일은 자동으로 저장되어 다음 자막에도 적용됩니다.</p>
@@ -337,10 +364,9 @@
           </form>
         </dialog>
 
-        <p id="subtitleStatus" class="subtitle-status" aria-live="polite">동영상을 다시 검색해 선택하세요.</p>
-      </section>
+        </section>
 
-      <section id="downloadPanel" class="tab-panel download-panel" role="tabpanel" aria-labelledby="downloadTab" hidden>
+      <section id="downloadPanel" class="subtitle-subpanel download-panel" role="tabpanel" aria-labelledby="extractSubtitleTab" hidden>
         <div class="subtitle-heading">
           <h2>감지된 자막 다운로드</h2>
           <p>영상을 재생하고 사이트의 자막을 켜면 자막 목록이 자동으로 갱신됩니다.</p>
@@ -350,6 +376,8 @@
         <ul id="downloadTracks" class="download-tracks" aria-label="감지된 자막"></ul>
         <p id="downloadStatus" class="subtitle-status" aria-live="polite"></p>
         <a id="searchSubtitlesOnline" class="link-button external-subtitle-search" href="https://sub.h2h.workers.dev/" target="_blank" rel="noopener noreferrer">인터넷에서 자막 검색</a>
+      </section>
+        <p id="subtitleStatus" class="subtitle-status" aria-live="polite">동영상을 다시 검색해 선택하세요.</p>
       </section>
     </main>
 

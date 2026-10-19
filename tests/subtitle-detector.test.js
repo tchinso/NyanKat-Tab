@@ -114,6 +114,54 @@ function domTrack(url, language = "en", label = "English") {
   return { src: url, kind: "subtitles", srclang: language, label, closest() { return null; }, getAttribute(name) { return this[name] || ""; } };
 }
 
+test("Cloudflare challenge documents keep native fetch and initiate no probe requests", async () => {
+  for (const pageUrl of [
+    "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/",
+    "https://hagen.challenges.cloudflare.com/",
+    "https://valid.alg13.dnstest.challenges.cloudflare.com/"
+  ]) {
+    const requests = [];
+    const error = new TypeError("Failed to fetch");
+    let rejected;
+    const nativeFetch = (url, options) => { requests.push({ url, options }); return rejected = Promise.reject(error); };
+    const environment = createEnvironment({ pageUrl, nativeFetch });
+    environment.flushTimers(30000);
+    await environment.settle();
+    assert.equal(environment.context.fetch, nativeFetch, "challenge fetch is not patched");
+    assert.equal(environment.context.__nyankatSoftSubProbeInstalled, undefined);
+    assert.equal(requests.length, 0, "installing or scanning never fetches a synthetic data URL");
+    const options = { cache: "no-store" };
+    const result = environment.context.fetch("data:,", options);
+    assert.equal(result, rejected, "the challenge's own CSP rejection keeps its native promise");
+    await assert.rejects(result, actual => actual === error);
+    assert.deepEqual(requests, [{ url: "data:,", options }], "the real challenge request is forwarded once without fabricated results");
+  }
+});
+
+test("normal pages and lookalike hostnames still capture subtitle traffic without synthetic fetches", async () => {
+  for (const pageUrl of [
+    "https://erulabo.com/837",
+    "https://cloudflare.com/player",
+    "https://notchallenges.cloudflare.com/player",
+    "https://challenges.cloudflare.com.example/player"
+  ]) {
+    const environment = createEnvironment({ pageUrl, fetchText(url) {
+      assert.ok(/^https?:/.test(url), "the passive probe must not generate prohibited data fetches");
+      return VTT;
+    } });
+    environment.flushTimers(30000);
+    await environment.settle();
+    assert.equal(environment.requests.length, 0);
+    assert.equal(environment.context.__nyankatSoftSubProbeInstalled, true);
+    await environment.context.fetch("https://cdn.example/sub.vtt");
+    await environment.settle();
+    environment.flushTimers();
+    assert.equal(environment.latest().tracks[0].url, "https://cdn.example/sub.vtt");
+    assert.equal((await environment.read("https://cdn.example/sub.vtt")).text, VTT);
+    assert.equal(environment.requests.length, 1, "normal caption capture uses only the page's request");
+  }
+});
+
 test("network captions are cached, verified, and disclosed only on an explicit read", async () => {
   const environment = createEnvironment();
   await environment.context.fetch("https://cdn.example/sub.ass");

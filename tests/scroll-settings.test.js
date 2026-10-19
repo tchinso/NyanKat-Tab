@@ -6,8 +6,8 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-function harness() {
-  const stored = {};
+function harness(initial = {}) {
+  const stored = structuredClone(initial);
   const writes = [];
   const elements = new Map();
   const timers = new Map();
@@ -15,11 +15,11 @@ function harness() {
   let failWrite = false;
   let heldWrite = null;
   const waitingWrites = [];
-  for (const id of ["enabled", "buttonSize", "opacity", "downSpeed", "fastDownSpeed", "disabledSites", "scrollControls", "status"]) {
+  for (const id of ["enabled", "showPositionHandle", "buttonSize", "opacity", "downSpeed", "fastDownSpeed", "disabledSites", "scrollControls", "status"]) {
     elements.set(id, { id, value: "", listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; } });
   }
   elements.get("scrollControls").querySelectorAll = () =>
-    ["buttonSize", "opacity", "downSpeed", "fastDownSpeed"].map(id => elements.get(id));
+    ["showPositionHandle", "buttonSize", "opacity", "downSpeed", "fastDownSpeed"].map(id => elements.get(id));
   const chrome = { storage: { sync: {
     get(defaults, callback) {
       const result = structuredClone({ ...defaults, ...stored });
@@ -46,7 +46,7 @@ function harness() {
   }
   function change(id, value) {
     const target = elements.get(id);
-    if (id === "enabled") target.checked = value;
+    if (["enabled", "showPositionHandle"].includes(id)) target.checked = value;
     else target.value = String(value);
     (target.listeners.change || elements.get("scrollControls").listeners.input)({ target });
   }
@@ -74,6 +74,29 @@ test("editing scroll speed preserves a newly moved position and external site ex
   assert.equal(h.stored.floatingScrollSettings.downSpeed, 12);
   assert.deepEqual(h.stored.floatingScrollDisabledSites, ["new.example.com"]);
   assert.deepEqual(Object.keys(h.writes[0]), ["floatingScrollSettings"]);
+});
+
+test("the position handle checkbox defaults off and saves without replacing current position", async () => {
+  const h = harness();
+  assert.equal(h.elements.get("showPositionHandle").checked, false);
+  h.stored.floatingScrollSettings = { opacity: 0.65, position: { x: 0.3, y: 0.7 } };
+  h.change("showPositionHandle", true);
+  await h.flush();
+  assert.equal(h.stored.floatingScrollSettings.showPositionHandle, true);
+  assert.equal(h.stored.floatingScrollSettings.opacity, 0.65);
+  assert.deepEqual(h.stored.floatingScrollSettings.position, { x: 0.3, y: 0.7 });
+
+  h.change("showPositionHandle", false);
+  await h.flush();
+  assert.equal(h.stored.floatingScrollSettings.showPositionHandle, false);
+});
+
+test("the position handle checkbox restores its saved value and follows the enabled control", () => {
+  const h = harness({ floatingScrollSettings: { enabled: false, showPositionHandle: true } });
+  assert.equal(h.elements.get("showPositionHandle").checked, true);
+  assert.equal(h.elements.get("showPositionHandle").disabled, true);
+  h.change("enabled", true);
+  assert.equal(h.elements.get("showPositionHandle").disabled, false);
 });
 
 test("editing exclusions does not overwrite scroll settings from another page", async () => {

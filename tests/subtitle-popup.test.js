@@ -112,12 +112,14 @@ async function harness(options = {}) {
   const saved = options.saved || {};
   const writes = [];
   const requests = [];
+  const shownTabs = [];
   const timers = new Map();
   let nextTimer = 1;
   const window = {
     setTimeout(fn, ms) { const id = nextTimer++; timers.set(id, { fn, ms }); return id; },
     clearTimeout(id) { timers.delete(id); },
-    addEventListener() {}
+    addEventListener() {},
+    NyanKatPopup: { showTab(...args) { shownTabs.push(args); } }
   };
   const chrome = {
     runtime: { getURL: file => "chrome-extension://test/" + file },
@@ -139,7 +141,8 @@ async function harness(options = {}) {
         if (message.type === "NYANKAT_SUBTITLE_PING") {
           respond({ ok: true, videos: options.videos || (options.video ? [{ id: "video-1", width: 1280, height: 720, playing: true, inViewport: true }] : []) });
         } else {
-          respond({ ok: true, state: { settings: options.videoStyle || window.NyanKatSubtitleStyle.DEFAULT_STYLE, offsetMs: options.offsetMs || 0, sourceLanguage: options.sourceLanguage || "ko" } });
+          respond({ ok: true, state: { settings: options.videoStyle || window.NyanKatSubtitleStyle.DEFAULT_STYLE,
+            offsetMs: options.offsetMs || 0, syncRate: options.syncRate ?? 1, sourceLanguage: options.sourceLanguage || "ko" } });
         }
       }
     },
@@ -162,7 +165,7 @@ async function harness(options = {}) {
     return found;
   };
   return {
-    window, document, saved, writes, requests, timers, element,
+    window, document, saved, writes, requests, shownTabs, timers, element,
     edit(id, value, event = "input") {
       const control = element(id);
       if (typeof value === "boolean") control.checked = value;
@@ -429,6 +432,7 @@ test("extracted UTF-8 subtitle becomes the selected local file with English sour
   const h = await harness({ video: true });
   const file = new File(["WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello"], "english.vtt");
   assert.equal(await h.window.NyanKatSubtitlePopup.importExtractedSubtitle({ file, text: await file.text(), filename: file.name }), true);
+  assert.deepEqual(h.shownTabs, [["subtitle", "overlay"]]);
   assert.equal(h.element("subtitleFile").files[0], file);
   assert.equal(h.element("subtitleEncoding").value, "utf-8");
   assert.equal(h.element("subtitleLanguage").value, "en");
@@ -438,11 +442,13 @@ test("extracted UTF-8 subtitle becomes the selected local file with English sour
   h.edit("videoSelect", h.element("videoSelect").value, "change");
   await settle();
   assert.equal(h.element("subtitleLanguage").value, "en", "choosing a video also preserves the imported file's source language");
+  h.edit("subtitleSyncRate", "1.04271");
   h.element("loadSubtitle").dispatchEvent({ type: "click" });
   await settle();
   const request = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_LOAD");
   assert.equal(request.message.payload.sourceLanguage, "en");
   assert.equal(request.message.payload.filename, "english.vtt");
+  assert.equal(request.message.payload.syncRate, 1.04271, "subtitle loading sends the selected numeric rate");
   assert.equal(Buffer.from(request.message.payload.b64, "base64").toString(), await file.text());
 });
 
@@ -569,4 +575,318 @@ test("an explicit manual offset can be adjusted before the video's status arrive
   await refresh;
   await settle();
   assert.equal(h.element("subtitleOffset").value, "2250");
+});
+
+test("rate input and all six FPS presets restore the selected video's rate with six decimal places", async () => {
+  const h = await harness({ video: true, syncRate: 0.95905 });
+  const input = h.element("subtitleSyncRate");
+  assert.equal(input.value, "1.000000");
+  assert.equal(input.type, "number");
+  assert.equal(input.step, "0.00001");
+  assert.equal(input.min, "0.1");
+  assert.equal(input.max, "10");
+  assert.deepEqual(h.document.querySelectorAll("[data-rate-adjust]").map(button => button.dataset.rateAdjust),
+    ["-0.001", "-0.0001", "0.0001", "0.001"]);
+  assert.deepEqual(h.document.querySelectorAll("[data-rate-preset]").map(button => button.dataset.ratePreset),
+    ["1", "0.95905", "0.96000", "0.99900", "1.00100", "1.04167", "1.04271"]);
+  await h.refresh();
+  assert.equal(input.value, "0.959050");
+  h.close();
+});
+
+test("manual rate input debounces for 160 ms and stale replies cannot replace a newer edit", async () => {
+  const h = await harness({ video: true, hold: message => message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE" });
+  await h.refresh();
+  h.edit("subtitleSyncRate", "1.00101");
+  await h.flushTimers(159);
+  assert.ok(!h.requests.some(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE"));
+  await h.flushTimers(160);
+  const first = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE");
+  assert.equal(first.message.payload.syncRate, 1.00101);
+  h.edit("subtitleSyncRate", "1.00201");
+  first.respond({ ok: true, state: { syncRate: 1.00101 } });
+  await settle();
+  assert.equal(Number(h.element("subtitleSyncRate").value), 1.00201);
+  await h.flushTimers(160);
+  const second = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE").at(-1);
+  assert.equal(second.message.payload.syncRate, 1.00201);
+  second.respond({ ok: true, state: { syncRate: 1.00201 } });
+  await settle();
+  assert.equal(h.element("subtitleSyncRate").value, "1.002010");
+  h.close();
+});
+
+test("rate adjustments include pending manual input and accumulate before delayed replies", async () => {
+  const h = await harness({ video: true, hold: message => message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE" });
+  await h.refresh();
+  h.edit("subtitleSyncRate", "1.04");
+  h.document.querySelector('[data-rate-adjust="0.0001"]').dispatchEvent({ type: "click" });
+  h.document.querySelector('[data-rate-adjust="0.001"]').dispatchEvent({ type: "click" });
+  assert.equal(h.element("subtitleSyncRate").value, "1.041100");
+  await h.flushTimers(160);
+  const requests = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE");
+  assert.deepEqual(requests.map(request => request.message.payload.syncRate), [1.0401, 1.0411]);
+  requests[1].respond({ ok: true, state: { syncRate: 1.0411 } });
+  await settle();
+  requests[0].respond({ ok: true, state: { syncRate: 1.0401 } });
+  await settle();
+  assert.equal(h.element("subtitleSyncRate").value, "1.041100");
+  h.close();
+});
+
+test("rate buttons clamp before later adjustments and FPS presets cancel a pending manual debounce", async () => {
+  const h = await harness({ video: true, hold: message => message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE" });
+  await h.refresh();
+  h.edit("subtitleSyncRate", "9.9999");
+  h.document.querySelector('[data-rate-adjust="0.001"]').dispatchEvent({ type: "click" });
+  assert.equal(h.element("subtitleSyncRate").value, "10.000000");
+  h.document.querySelector('[data-rate-adjust="-0.0001"]').dispatchEvent({ type: "click" });
+  assert.equal(h.element("subtitleSyncRate").value, "9.999900");
+  h.edit("subtitleSyncRate", "0.1001");
+  h.document.querySelector('[data-rate-adjust="-0.001"]').dispatchEvent({ type: "click" });
+  assert.equal(h.element("subtitleSyncRate").value, "0.100000");
+  h.document.querySelector('[data-rate-adjust="0.0001"]').dispatchEvent({ type: "click" });
+  assert.equal(h.element("subtitleSyncRate").value, "0.100100");
+  h.requests.length = 0;
+  h.edit("subtitleSyncRate", "1.00001");
+  for (const button of h.document.querySelectorAll("[data-rate-preset]")) {
+    button.dispatchEvent({ type: "click" });
+    assert.equal(h.element("subtitleSyncRate").value, Number(button.dataset.ratePreset).toFixed(6));
+  }
+  await h.flushTimers(160);
+  assert.deepEqual(h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE")
+    .map(request => request.message.payload.syncRate), [1, 0.95905, 0.96, 0.999, 1.001, 1.04167, 1.04271]);
+  h.close();
+});
+
+for (const pendingType of ["NYANKAT_SUBTITLE_GET_STATUS", "NYANKAT_SUBTITLE_UPDATE_STYLE"]) {
+  test(`rate buttons use the video's actual rate while ${pendingType} is pending`, async () => {
+    const h = await harness({ video: true, syncRate: 0.96, hold: message =>
+      message.type === pendingType || /NYANKAT_SUBTITLE_(?:SET|ADJUST)_SYNC_RATE/.test(message.type) });
+    const refresh = h.window.NyanKatSubtitlePopup.refreshVideos();
+    await settle();
+    const pending = h.requests.find(request => request.message.type === pendingType);
+    assert.ok(pending);
+    const faster = h.document.querySelector('[data-rate-adjust="0.0001"]');
+    faster.dispatchEvent({ type: "click" });
+    faster.dispatchEvent({ type: "click" });
+    const requests = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_ADJUST_SYNC_RATE");
+    assert.deepEqual(requests.map(request => request.message.payload.deltaRate), [0.0001, 0.0001]);
+    assert.ok(!h.requests.some(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE"));
+    requests[1].respond({ ok: true, state: { syncRate: 0.9602 } });
+    await settle();
+    requests[0].respond({ ok: true, state: { syncRate: 0.9601 } });
+    pending.respond({ ok: true, state: { syncRate: 0.96 } });
+    await refresh;
+    await settle();
+    assert.equal(h.element("subtitleSyncRate").value, "0.960200");
+    faster.dispatchEvent({ type: "click" });
+    const absolute = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE");
+    assert.equal(absolute.message.payload.syncRate, 0.9603);
+    absolute.respond({ ok: true, state: { syncRate: 0.9603 } });
+    await settle();
+    h.close();
+  });
+}
+
+test("rate buttons do not apply the previous video's rate to a newly selected video", async () => {
+  let holdStatus = false;
+  const h = await harness({ videos: [
+    { id: "video-1", width: 1280, height: 720, playing: true, inViewport: true },
+    { id: "video-2", width: 640, height: 360, playing: false, inViewport: true }
+  ], syncRate: 0.96, hold: message => (holdStatus && message.type === "NYANKAT_SUBTITLE_GET_STATUS") ||
+    /NYANKAT_SUBTITLE_(?:SET|ADJUST)_SYNC_RATE/.test(message.type) });
+  await h.refresh();
+  assert.equal(h.element("subtitleSyncRate").value, "0.960000");
+  holdStatus = true;
+  h.edit("videoSelect", "0:video-2", "change");
+  await settle();
+  h.document.querySelector('[data-rate-adjust="0.001"]').dispatchEvent({ type: "click" });
+  const adjustment = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_ADJUST_SYNC_RATE");
+  assert.deepEqual(adjustment.message.payload, { videoId: "video-2", deltaRate: 0.001 });
+  adjustment.respond({ ok: true, state: { syncRate: 1.041 } });
+  await settle();
+  h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_GET_STATUS").at(-1)
+    .respond({ ok: true, state: { syncRate: 1.04 } });
+  await settle();
+  assert.equal(h.element("subtitleSyncRate").value, "1.041000");
+  h.close();
+});
+
+test("an explicit manual rate can be adjusted before the video's status arrives", async () => {
+  const h = await harness({ video: true, hold: message => message.type === "NYANKAT_SUBTITLE_GET_STATUS" ||
+    message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE" });
+  const refresh = h.window.NyanKatSubtitlePopup.refreshVideos();
+  await settle();
+  h.edit("subtitleSyncRate", "0.95905");
+  h.document.querySelector('[data-rate-adjust="0.0001"]').dispatchEvent({ type: "click" });
+  await h.flushTimers(160);
+  const writes = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].message.payload.syncRate, 0.95915);
+  writes[0].respond({ ok: true, state: { syncRate: 0.95915 } });
+  h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_GET_STATUS")
+    .respond({ ok: true, state: { syncRate: 1.04 } });
+  await refresh;
+  await settle();
+  assert.equal(h.element("subtitleSyncRate").value, "0.959150");
+  h.close();
+});
+
+test("offset and rate replies preserve the other control's independently pending manual edit", async () => {
+  const h = await harness({ video: true, offsetMs: 2000, syncRate: 0.96,
+    hold: message => /NYANKAT_SUBTITLE_SET_(?:OFFSET|SYNC_RATE)/.test(message.type) });
+  await h.refresh();
+  h.edit("subtitleOffset", "4000");
+  h.edit("subtitleSyncRate", "0.95905");
+  await h.flushTimers(160);
+  const offset = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_SET_OFFSET");
+  const rate = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE");
+  assert.equal(offset.message.payload.offsetMs, 4000);
+  assert.equal(rate.message.payload.syncRate, 0.95905);
+  offset.respond({ ok: true, state: { offsetMs: 4000, syncRate: 0.96 } });
+  await settle();
+  assert.equal(Number(h.element("subtitleSyncRate").value), 0.95905);
+  rate.respond({ ok: true, state: { offsetMs: 2000, syncRate: 0.95905 } });
+  await settle();
+  assert.equal(h.element("subtitleOffset").value, "4000");
+  assert.equal(h.element("subtitleSyncRate").value, "0.959050");
+  h.close();
+});
+
+test("a delayed style preview cannot replace either timing control's pending manual edit", async () => {
+  let holdPreview = false;
+  const h = await harness({ video: true, offsetMs: 2000, syncRate: 0.96,
+    hold: message => holdPreview && message.type === "NYANKAT_SUBTITLE_UPDATE_STYLE" });
+  await h.refresh();
+  holdPreview = true;
+  h.edit("subtitleFontSize", 72);
+  await h.flushTimers(120);
+  const preview = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_UPDATE_STYLE").at(-1);
+  h.edit("subtitleOffset", "3000");
+  h.edit("subtitleSyncRate", "1.00101");
+  preview.respond({ ok: true, state: { offsetMs: 2000, syncRate: 0.96 } });
+  await settle();
+  assert.equal(h.element("subtitleOffset").value, "3000");
+  assert.equal(Number(h.element("subtitleSyncRate").value), 1.00101);
+  h.close();
+});
+
+for (const pendingType of ["NYANKAT_SUBTITLE_GET_STATUS", "NYANKAT_SUBTITLE_UPDATE_STYLE"]) {
+  test(`a rate reply restores the unedited offset while initial ${pendingType} is pending`, async () => {
+    const h = await harness({ video: true, offsetMs: 5000, syncRate: 1.04,
+      hold: message => message.type === pendingType || message.type === "NYANKAT_SUBTITLE_ADJUST_SYNC_RATE" });
+    const refresh = h.window.NyanKatSubtitlePopup.refreshVideos();
+    await settle();
+    const pending = h.requests.find(request => request.message.type === pendingType);
+    assert.ok(pending);
+    h.document.querySelector('[data-rate-adjust="0.001"]').dispatchEvent({ type: "click" });
+    const rate = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_ADJUST_SYNC_RATE");
+    assert.ok(rate);
+    rate.respond({ ok: true, state: { offsetMs: 5000, syncRate: 1.041 } });
+    await settle();
+    assert.equal(h.element("subtitleOffset").value, "5000", "the untouched offset is populated from the rate response");
+    pending.respond({ ok: true, state: { offsetMs: 5000, syncRate: 1.04 } });
+    await refresh;
+    await settle();
+    assert.equal(h.element("subtitleSyncRate").value, "1.041000", "the late initial reply cannot undo the rate adjustment");
+    h.element("subtitleFile").files = [new File(["1\n00:00:01,000 --> 00:00:03,000\nHello"], "sync.srt")];
+    h.element("loadSubtitle").dispatchEvent({ type: "click" });
+    await settle();
+    const load = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_LOAD");
+    assert.equal(load.message.payload.offsetMs, 5000, "loading a file preserves the video's existing offset");
+    assert.equal(load.message.payload.syncRate, 1.041);
+    h.close();
+  });
+}
+
+test("refreshing the same video preserves a manual rate edit before and after its pending debounce", async () => {
+  const h = await harness({ video: true, syncRate: 1.04,
+    hold: message => message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE" });
+  await h.refresh();
+  h.edit("subtitleSyncRate", "0.95905");
+  await h.refresh();
+  assert.equal(Number(h.element("subtitleSyncRate").value), 0.95905, "tab refresh keeps the pending field value");
+  await h.flushTimers(160);
+  const rate = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE");
+  assert.equal(rate.message.payload.syncRate, 0.95905);
+  rate.respond({ ok: true, state: { offsetMs: 0, syncRate: 0.95905 } });
+  await settle();
+  assert.equal(h.element("subtitleSyncRate").value, "0.959050", "the original target's reply still belongs to this video after refresh");
+  h.element("subtitleFile").files = [new File(["1\n00:00:01,000 --> 00:00:03,000\nHello"], "refresh.srt")];
+  h.element("loadSubtitle").dispatchEvent({ type: "click" });
+  await settle();
+  const load = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_LOAD");
+  assert.equal(load.message.payload.syncRate, 0.95905);
+  h.close();
+});
+
+test("an in-flight relative offset update survives a later rate adjustment", async () => {
+  const h = await harness({ video: true, offsetMs: 5000, syncRate: 1.04,
+    hold: message => message.type === "NYANKAT_SUBTITLE_GET_STATUS" ||
+      /NYANKAT_SUBTITLE_ADJUST_(?:OFFSET|SYNC_RATE)/.test(message.type) });
+  const refresh = h.window.NyanKatSubtitlePopup.refreshVideos();
+  await settle();
+  h.document.querySelector('[data-offset-adjust="250"]').dispatchEvent({ type: "click" });
+  const offset = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_ADJUST_OFFSET");
+  assert.ok(offset);
+  h.document.querySelector('[data-rate-adjust="0.001"]').dispatchEvent({ type: "click" });
+  const rate = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_ADJUST_SYNC_RATE");
+  assert.ok(rate);
+  rate.respond({ ok: true, state: { offsetMs: 5000, syncRate: 1.041 } });
+  await settle();
+  offset.respond({ ok: true, state: { offsetMs: 5250, syncRate: 1.04 } });
+  await settle();
+  h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_GET_STATUS")
+    .respond({ ok: true, state: { offsetMs: 5000, syncRate: 1.04 } });
+  await refresh;
+  await settle();
+  assert.equal(h.element("subtitleOffset").value, "5250");
+  assert.equal(h.element("subtitleSyncRate").value, "1.041000");
+  h.close();
+});
+
+test("a style preview started during a rate update cannot overwrite the completed rate", async () => {
+  let holdPreview = false;
+  const h = await harness({ video: true, syncRate: 1.04,
+    hold: message => message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE" ||
+      (holdPreview && message.type === "NYANKAT_SUBTITLE_UPDATE_STYLE") });
+  await h.refresh();
+  h.edit("subtitleSyncRate", "0.95905");
+  await h.flushTimers(160);
+  const rate = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE");
+  holdPreview = true;
+  h.edit("subtitleFontSize", 72);
+  await h.flushTimers(120);
+  const preview = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_UPDATE_STYLE").at(-1);
+  rate.respond({ ok: true, state: { offsetMs: 0, syncRate: 0.95905 } });
+  await settle();
+  assert.equal(h.element("subtitleSyncRate").value, "0.959050");
+  preview.respond({ ok: true, state: { offsetMs: 0, syncRate: 1.04 } });
+  await settle();
+  assert.equal(h.element("subtitleSyncRate").value, "0.959050", "clearing pending state cannot make the earlier preview authoritative");
+  h.close();
+});
+
+test("a same-video refresh started during a rate update cannot overwrite the completed rate", async () => {
+  let holdPreview = false;
+  const h = await harness({ video: true, syncRate: 1.04,
+    hold: message => message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE" ||
+      (holdPreview && message.type === "NYANKAT_SUBTITLE_UPDATE_STYLE") });
+  await h.refresh();
+  h.edit("subtitleSyncRate", "1.00101");
+  await h.flushTimers(160);
+  const rate = h.requests.find(request => request.message.type === "NYANKAT_SUBTITLE_SET_SYNC_RATE");
+  holdPreview = true;
+  const refresh = h.window.NyanKatSubtitlePopup.refreshVideos();
+  await settle();
+  const preview = h.requests.filter(request => request.message.type === "NYANKAT_SUBTITLE_UPDATE_STYLE").at(-1);
+  rate.respond({ ok: true, state: { offsetMs: 0, syncRate: 1.00101 } });
+  await settle();
+  assert.equal(h.element("subtitleSyncRate").value, "1.001010");
+  preview.respond({ ok: true, state: { offsetMs: 0, syncRate: 1.04 } });
+  await refresh;
+  await settle();
+  assert.equal(h.element("subtitleSyncRate").value, "1.001010", "the held refresh keeps its original timing restoration permissions");
+  h.close();
 });

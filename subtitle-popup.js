@@ -8,6 +8,7 @@
     encoding: document.querySelector("#subtitleEncoding"),
     language: document.querySelector("#subtitleLanguage"),
     offset: document.querySelector("#subtitleOffset"),
+    syncRate: document.querySelector("#subtitleSyncRate"),
     load: document.querySelector("#loadSubtitle"),
     unload: document.querySelector("#unloadSubtitle"),
     status: document.querySelector("#subtitleStatus")
@@ -46,6 +47,12 @@
   let styleTimer = 0;
   let offsetTimer = 0;
   let offsetTarget = null;
+  let offsetPendingTarget = null;
+  let offsetRevision = 0;
+  let rateTimer = 0;
+  let rateTarget = null;
+  let ratePendingTarget = null;
+  let rateRevision = 0;
   let refreshVersion = 0;
   let uiRevision = 0;
   let styleRevision = 0;
@@ -359,11 +366,17 @@
     }
   }
 
-  function applyState(state, restoreLanguage = false) {
+  function applyState(state, restoreLanguage = false, restoreOffset = true, restoreRate = true) {
     // Stored style and the user's edits are authoritative; overlay replies can be stale.
     if (state) {
-      elements.offset.value = String(Math.round(Number(state.offsetMs) || 0));
-      offsetTarget = getSelectedTarget();
+      if (restoreOffset && (!offsetPendingTarget || offsetPendingTarget !== getSelectedTarget())) {
+        elements.offset.value = String(Math.round(Number(state.offsetMs) || 0));
+        offsetTarget = getSelectedTarget();
+      }
+      if (restoreRate && (!ratePendingTarget || ratePendingTarget !== getSelectedTarget())) {
+        elements.syncRate.value = normalizeSyncRate(state.syncRate).toFixed(6);
+        rateTarget = getSelectedTarget();
+      }
       if (restoreLanguage && !languageTouched && state.sourceLanguage) {
         elements.language.value = translation?.normalizeLanguage(state.sourceLanguage) || "ko";
         updateLanguageFields();
@@ -381,6 +394,8 @@
       return;
     }
     const revision = uiRevision;
+    const restoreOffset = offsetPendingTarget !== target;
+    const restoreRate = ratePendingTarget !== target;
 
     await styleReady;
     if (!isCurrentRequest(target, revision)) {
@@ -394,7 +409,7 @@
     if (response && response.ok && isCurrentRequest(target, revision)) {
       const updated = await sendStyleToTarget(target, readStyle());
       if (isCurrentRequest(target, revision)) {
-        applyState(updated?.ok ? updated.state : response.state, true);
+        applyState(updated?.ok ? updated.state : response.state, true, restoreOffset, restoreRate);
       }
     }
   }
@@ -426,17 +441,22 @@
       return;
     }
 
+    const previousTargets = new Map(targetsByKey);
     targetsByKey.clear();
     elements.videoSelect.replaceChildren();
     for (const { frame, response } of results) {
       const videos = response && response.ok && Array.isArray(response.videos) ? response.videos : [];
       for (const video of videos) {
         const key = frame.frameId + ":" + video.id;
-        const target = {
+        const previous = previousTargets.get(key);
+        const target = previous?.tabId === tab.id && previous.frameUrl === frame.url &&
+          previous.documentId === frame.documentId ? previous : {
           key,
           tabId: tab.id,
           frameId: frame.frameId,
-          videoId: video.id
+          videoId: video.id,
+          frameUrl: frame.url,
+          documentId: frame.documentId
         };
         targetsByKey.set(key, target);
         const option = document.createElement("option");
@@ -518,6 +538,7 @@
       encoding: elements.encoding.value,
       sourceLanguage: elements.language.value,
       offsetMs: Number(elements.offset.value) || 0,
+      syncRate: normalizeSyncRate(elements.syncRate.value),
       settings: readStyle()
     });
     if (!response || !response.ok) {
@@ -570,7 +591,7 @@
     updateLanguageFields();
     languageTouched = true;
     uiRevision += 1;
-    window.NyanKatPopup?.showTab("subtitle");
+    window.NyanKatPopup?.showTab("subtitle", "overlay");
     await videoRefresh;
     setStatus((partial ? "로드된 구간만 가져왔습니다. " : "자막 파일을 가져왔습니다. ") +
       "언어를 영어로 설정했습니다. 대상 동영상을 선택한 뒤 ‘자막 적용’을 누르세요.");
@@ -607,15 +628,17 @@
     styleTimer = window.setTimeout(async () => {
       const response = await sendStyleToTarget(target, settings);
       if (response && response.ok && isCurrentRequest(target, revision)) {
-        applyState(response.state);
+        applyState(response.state, false, offsetTarget !== target, rateTarget !== target);
       }
     }, 120);
   }
 
   function queueOffsetUpdate() {
-    const revision = ++uiRevision;
+    uiRevision += 1;
+    const revision = ++offsetRevision;
     const target = getSelectedTarget();
     offsetTarget = target;
+    offsetPendingTarget = target;
     const offsetMs = Number(elements.offset.value) || 0;
     window.clearTimeout(offsetTimer);
     offsetTimer = window.setTimeout(async () => {
@@ -627,9 +650,63 @@
         type: "NYANKAT_SUBTITLE_SET_OFFSET",
         payload: { videoId: target.videoId, offsetMs }
       });
-      if (response && response.ok && isCurrentRequest(target, revision)) {
-        elements.offset.value = String(Math.round(response.state.offsetMs));
+      if (response?.ok) applyOffsetResponse(response.state, target, revision);
+    }, 160);
+  }
+
+  function applyOffsetResponse(state, target, revision) {
+    if (getSelectedTarget() !== target || offsetRevision !== revision) return;
+    offsetPendingTarget = null;
+    elements.offset.value = String(Math.round(Number(state.offsetMs) || 0));
+    offsetTarget = target;
+    if (rateTarget !== target && ratePendingTarget !== target) {
+      elements.syncRate.value = normalizeSyncRate(state.syncRate).toFixed(6);
+      rateTarget = target;
+    }
+  }
+
+  function normalizeSyncRate(value) {
+    const rate = Number(value);
+    return Number.isFinite(rate) && rate > 0 ? Math.min(10, Math.max(0.1, rate)) : 1;
+  }
+
+  async function sendRateUpdate(target, revision, type, payload) {
+    if (!target) {
+      setStatus("먼저 대상 동영상을 선택하세요.");
+      return;
+    }
+    const response = await sendToFrame(target.tabId, target.frameId, {
+      type, payload: { videoId: target.videoId, ...payload }
+    });
+    if (getSelectedTarget() !== target || rateRevision !== revision) return;
+    ratePendingTarget = null;
+    if (response?.ok) {
+      elements.syncRate.value = normalizeSyncRate(response.state.syncRate).toFixed(6);
+      rateTarget = target;
+      if (offsetTarget !== target && offsetPendingTarget !== target) {
+        elements.offset.value = String(Math.round(Number(response.state.offsetMs) || 0));
+        offsetTarget = target;
       }
+    } else {
+      setStatus("자막 배속 조정에 실패했습니다.");
+    }
+  }
+
+  function queueRateUpdate() {
+    uiRevision += 1;
+    const revision = ++rateRevision;
+    const target = getSelectedTarget();
+    rateTarget = target;
+    ratePendingTarget = target;
+    window.clearTimeout(rateTimer);
+    const value = Number(elements.syncRate.value);
+    if (!Number.isFinite(value) || value <= 0) {
+      setStatus("자막 배속은 0보다 큰 숫자로 입력하세요.");
+      return;
+    }
+    const syncRate = normalizeSyncRate(value);
+    rateTimer = window.setTimeout(() => {
+      void sendRateUpdate(target, revision, "NYANKAT_SUBTITLE_SET_SYNC_RATE", { syncRate });
     }, 160);
   }
 
@@ -644,6 +721,8 @@
   elements.unload.addEventListener("click", unloadSubtitle);
   elements.offset.addEventListener("input", queueOffsetUpdate);
   elements.offset.addEventListener("change", queueOffsetUpdate);
+  elements.syncRate.addEventListener("input", queueRateUpdate);
+  elements.syncRate.addEventListener("change", queueRateUpdate);
   elements.language.addEventListener("change", () => { void updateLanguage(); });
   elements.file.addEventListener("change", () => {
     importedFile = null;
@@ -677,8 +756,10 @@
 
   for (const button of document.querySelectorAll("[data-offset-adjust]")) {
     button.addEventListener("click", async () => {
-      const revision = ++uiRevision;
+      uiRevision += 1;
+      const revision = ++offsetRevision;
       const target = getSelectedTarget();
+      offsetPendingTarget = target;
       // Only use the field after this video's state has arrived or the user
       // explicitly edited it. Before then, adjust the video's actual offset.
       window.clearTimeout(offsetTimer);
@@ -698,10 +779,34 @@
         return;
       }
 
-      if (isCurrentRequest(target, revision)) {
-        applyState(response.state);
-      }
+      applyOffsetResponse(response.state, target, revision);
       setStatus("자막 싱크를 조정했습니다.");
+    });
+  }
+
+  for (const button of [
+    ...document.querySelectorAll("[data-rate-adjust]"),
+    ...document.querySelectorAll("[data-rate-preset]")
+  ]) {
+    button.addEventListener("click", () => {
+      uiRevision += 1;
+      const revision = ++rateRevision;
+      const target = getSelectedTarget();
+      window.clearTimeout(rateTimer);
+      ratePendingTarget = target;
+      if (button.dataset.ratePreset !== undefined || !target || rateTarget === target) {
+        const syncRate = normalizeSyncRate(button.dataset.ratePreset !== undefined
+          ? button.dataset.ratePreset
+          : Math.round((normalizeSyncRate(elements.syncRate.value) + Number(button.dataset.rateAdjust)) * 1e6) / 1e6);
+        elements.syncRate.value = syncRate.toFixed(6);
+        rateTarget = target;
+        void sendRateUpdate(target, revision, "NYANKAT_SUBTITLE_SET_SYNC_RATE", { syncRate });
+      } else {
+        // Before this video's state arrives, adjust its actual saved rate.
+        void sendRateUpdate(target, revision, "NYANKAT_SUBTITLE_ADJUST_SYNC_RATE", {
+          deltaRate: Number(button.dataset.rateAdjust)
+        });
+      }
     });
   }
 
@@ -787,7 +892,7 @@
   });
 
   document.addEventListener("nyankat-popup-tab-shown", (event) => {
-    if (event.detail && event.detail.tabName === "subtitle") {
+    if (event.detail && ["subtitle", "style"].includes(event.detail.tabName)) {
       videoRefresh = refreshVideos();
     }
   });

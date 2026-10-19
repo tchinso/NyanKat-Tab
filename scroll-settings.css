@@ -80,6 +80,10 @@ main {
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
 }
 
+.position-handle-control {
+  grid-column: 1 / -1;
+}
+
 label {
   display: grid;
   gap: 5px;

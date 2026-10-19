@@ -87,6 +87,21 @@ main {
   display: none;
 }
 
+.subtitle-tab-list {
+  margin: -12px -12px 0;
+  padding-top: 0;
+}
+
+.subtitle-subpanel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.subtitle-subpanel[hidden] {
+  display: none;
+}
+
 .toggle-row,
 .field-row {
   align-items: center;
@@ -254,7 +269,8 @@ footer {
 }
 
 .subtitle-row select,
-.subtitle-row input[type="number"] {
+.subtitle-row input[type="number"],
+.file-row input[type="file"] {
   box-sizing: border-box;
 }
 
@@ -341,6 +357,22 @@ footer {
 
 .sync-controls small {
   line-height: 1.35;
+}
+
+.rate-buttons {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.rate-buttons [data-rate-preset] {
+  grid-column: 1 / -1;
+}
+
+.fps-presets {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sync-preset-label {
+  font-size: 12px;
 }
 
 .subtitle-actions {

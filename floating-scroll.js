@@ -3,6 +3,7 @@
 const FLOATING_SCROLL_DEFAULT_SETTINGS = {
   floatingScrollSettings: {
     enabled: true,
+    showPositionHandle: false,
     buttonSize: 72,
     opacity: 0.2,
     downSpeed: 7.5,
@@ -39,7 +40,6 @@ let scrollAccumulator = 0;
 let scrollTarget = null;
 let lastScrollableElement = null;
 let lastFrameTime = 0;
-let isPositionEditing = false;
 let dragState = null;
 let fullscreenVisibilityFrame = 0;
 
@@ -60,6 +60,7 @@ function normalizeScrollSettings(value) {
   const defaultPosition = FLOATING_SCROLL_DEFAULT_SETTINGS.floatingScrollSettings.position;
   return {
     enabled: !value || value.enabled !== false,
+    showPositionHandle: Boolean(value && value.showPositionHandle === true),
     buttonSize: clampNumber(
       value && value.buttonSize,
       FLOATING_SCROLL_MIN_SIZE,
@@ -248,7 +249,9 @@ function isAtScrollLimit(speed) {
 
 function scrollDocumentByAmount(scrollAmount) {
   const beforeScrollTop = getScrollTop();
-  window.scrollBy(0, scrollAmount);
+  // A site's scroll-behavior:smooth defers numeric scrollBy/scrollTop changes.
+  // Each animation frame must move immediately so the progress check is valid.
+  window.scrollBy({ top: scrollAmount, left: 0, behavior: "instant" });
 
   if (getScrollTop() !== beforeScrollTop) {
     return true;
@@ -263,13 +266,21 @@ function scrollDocumentByAmount(scrollAmount) {
   }
 
   for (const scrollElement of scrollElements) {
-    scrollElement.scrollTop = nextScrollTop;
+    setScrollTopInstantly(scrollElement, nextScrollTop);
     if (getScrollTop() !== beforeScrollTop) {
       return true;
     }
   }
 
   return false;
+}
+
+function setScrollTopInstantly(element, top) {
+  if (typeof element.scrollTo === "function") {
+    element.scrollTo({ top, behavior: "instant" });
+  } else {
+    element.scrollTop = top;
+  }
 }
 
 function scrollElementByAmount(element, scrollAmount) {
@@ -284,7 +295,7 @@ function scrollElementByAmount(element, scrollAmount) {
     return false;
   }
 
-  element.scrollTop = nextScrollTop;
+  setScrollTopInstantly(element, nextScrollTop);
   return element.scrollTop !== beforeScrollTop;
 }
 
@@ -418,69 +429,41 @@ function persistPosition() {
     return;
   }
 
-  chrome.storage.sync.set({ floatingScrollSettings: scrollSettings }, () => {
-    // Ignore transient page-unload and extension-reload errors.
-    void chrome.runtime.lastError;
+  const position = { ...scrollSettings.position };
+  chrome.storage.sync.get(FLOATING_SCROLL_DEFAULT_SETTINGS, (stored) => {
+    if (chrome.runtime.lastError) return;
+    chrome.storage.sync.set({
+      floatingScrollSettings: {
+        ...normalizeScrollSettings(stored.floatingScrollSettings),
+        position
+      }
+    }, () => {
+      // Ignore transient page-unload and extension-reload errors.
+      void chrome.runtime.lastError;
+    });
   });
 }
 
-function setPositionEditing(enabled) {
-  isPositionEditing = Boolean(enabled && container && scrollSettings);
-  if (!container) {
-    return false;
-  }
-
-  const finishButton = container.querySelector("[data-nyankat-position-finish]");
-  container.style.cursor = isPositionEditing ? "move" : "";
-  container.style.outline = isPositionEditing ? "2px solid #60a5fa" : "";
-  container.style.outlineOffset = isPositionEditing ? "4px" : "";
-  container.title = isPositionEditing ? "드래그해서 위치를 조정하세요." : "";
-
-  if (isPositionEditing && !finishButton) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = "완료";
-    button.title = "위치 조정 완료";
-    button.setAttribute("data-nyankat-position-finish", "true");
-    button.style.cssText = [
-      "background:#2563eb",
-      "border:1px solid rgba(255,255,255,.55)",
-      "border-radius:6px",
-      "bottom:calc(100% + 8px)",
-      "color:white",
-      "cursor:pointer",
-      "font:600 12px system-ui,sans-serif",
-      "padding:5px 8px",
-      "position:absolute",
-      "right:0"
-    ].join(";");
-    button.addEventListener("pointerdown", (event) => event.stopPropagation());
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setPositionEditing(false);
-    });
-    container.append(button);
-  } else if (!isPositionEditing && finishButton) {
-    finishButton.remove();
-  }
-
-  return isPositionEditing;
-}
-
 function beginPositionDrag(event) {
-  if (!isPositionEditing || !container || event.button !== 0) {
+  if (
+    dragState || !container || !scrollSettings || !scrollSettings.showPositionHandle ||
+    event.button !== 0 || event.isPrimary === false
+  ) {
     return;
   }
 
+  stopAutoScroll();
   const rect = container.getBoundingClientRect();
   dragState = {
+    handle: event.currentTarget,
     pointerId: event.pointerId,
     offsetX: event.clientX - rect.left,
     offsetY: event.clientY - rect.top
   };
   event.preventDefault();
-  container.setPointerCapture(event.pointerId);
+  event.stopPropagation();
+  dragState.handle.style.cursor = "grabbing";
+  dragState.handle.setPointerCapture(event.pointerId);
 }
 
 function movePositionDrag(event) {
@@ -501,6 +484,7 @@ function movePositionDrag(event) {
   };
   positionContainer();
   event.preventDefault();
+  event.stopPropagation();
 }
 
 function endPositionDrag(event) {
@@ -508,11 +492,54 @@ function endPositionDrag(event) {
     return;
   }
 
-  if (container && container.hasPointerCapture(event.pointerId)) {
-    container.releasePointerCapture(event.pointerId);
-  }
+  const handle = dragState.handle;
   dragState = null;
+  handle.style.cursor = "grab";
+  if (handle.hasPointerCapture(event.pointerId)) {
+    handle.releasePointerCapture(event.pointerId);
+  }
+  event.preventDefault();
+  event.stopPropagation();
   persistPosition();
+}
+
+function createPositionHandle() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.title = "드래그해서 자동 스크롤 버튼 위치 조정";
+  button.setAttribute("aria-label", button.title);
+  button.setAttribute("data-nyankat-position-handle", "true");
+  // Stay outside the grid layout so the four scroll buttons keep their size
+  // and spacing. The small circle fits in the gap between their rounded corners.
+  button.style.cssText = [
+    "all:initial",
+    "background:#ef4444",
+    "border:0",
+    "border-radius:50%",
+    "box-sizing:border-box",
+    "cursor:grab",
+    "display:block",
+    "height:12px",
+    "left:50%",
+    "opacity:" + scrollSettings.opacity,
+    "padding:0",
+    "position:absolute",
+    "top:50%",
+    "touch-action:none",
+    "transform:translate(-50%,-50%)",
+    "width:12px",
+    "z-index:1"
+  ].join(";");
+  button.addEventListener("pointerdown", beginPositionDrag);
+  button.addEventListener("pointermove", movePositionDrag);
+  button.addEventListener("pointerup", endPositionDrag);
+  button.addEventListener("pointercancel", endPositionDrag);
+  button.addEventListener("lostpointercapture", endPositionDrag);
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  return button;
 }
 
 function createButton(label, title, action) {
@@ -542,17 +569,11 @@ function createButton(label, title, action) {
   ].join(";");
 
   button.addEventListener("pointerdown", (event) => {
-    if (isPositionEditing) {
-      return;
-    }
     event.stopPropagation();
   });
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (isPositionEditing) {
-      return;
-    }
     action();
   });
 
@@ -572,6 +593,7 @@ function rememberScrollableElement(event) {
 
 function removeContainer() {
   stopAutoScroll();
+  dragState = null;
   if (container) {
     container.remove();
     container = null;
@@ -620,7 +642,6 @@ function renderContainer() {
 
   removeContainer();
   const size = scrollSettings.buttonSize;
-  const wasPositionEditing = isPositionEditing;
   container = document.createElement("div");
   container.setAttribute("data-nyankat-floating-scroll", "true");
   container.setAttribute("aria-label", "자동 스크롤 버튼");
@@ -641,14 +662,10 @@ function renderContainer() {
     createButton("⏬", "빠르게 아래로 자동 스크롤", () => startAutoScroll(scrollSettings.fastDownSpeed)),
     createButton("⬇️", "페이지 95% 지점으로 이동", () => scrollPageTo(getMaxScrollTop() * 0.95))
   );
-  container.addEventListener("pointerdown", beginPositionDrag);
-  container.addEventListener("pointermove", movePositionDrag);
-  container.addEventListener("pointerup", endPositionDrag);
-  container.addEventListener("pointercancel", endPositionDrag);
+  if (scrollSettings.showPositionHandle) container.append(createPositionHandle());
 
   document.documentElement.append(container);
   positionContainer();
-  setPositionEditing(wasPositionEditing);
   syncFullscreenVisibility();
 }
 
@@ -657,16 +674,12 @@ function applySettings(settings) {
   const disabledSites = normalizeDisabledSites(settings.floatingScrollDisabledSites);
   if (disabledSites.some((host) => matchesHost(currentHost, host))) {
     scrollSettings = null;
-    isPositionEditing = false;
     renderContainer();
     return;
   }
 
   const normalizedSettings = normalizeScrollSettings(settings.floatingScrollSettings);
   scrollSettings = normalizedSettings.enabled ? normalizedSettings : null;
-  if (!scrollSettings) {
-    isPositionEditing = false;
-  }
   renderContainer();
 }
 
@@ -694,19 +707,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 document.addEventListener("yt-navigate-finish", refreshForPageUrl);
 window.addEventListener("popstate", refreshForPageUrl);
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || message.type !== "NYANKAT_FLOATING_SCROLL_SET_POSITION_MODE") {
-    return;
-  }
-
-  const enabled = setPositionEditing(message.enabled === true);
-  sendResponse({
-    ok: enabled || message.enabled !== true,
-    enabled,
-    reason: enabled || message.enabled !== true ? undefined : "button_not_available"
-  });
-});
-
 window.addEventListener("mousedown", (event) => {
   if (!container || !container.contains(event.target)) {
     rememberScrollableElement(event);
@@ -715,7 +715,10 @@ window.addEventListener("mousedown", (event) => {
 }, true);
 window.addEventListener("wheel", rememberScrollableElement, { capture: true, passive: true });
 window.addEventListener("keydown", stopAutoScroll, true);
-window.addEventListener("blur", stopAutoScroll, true);
+window.addEventListener("blur", (event) => {
+  // Element focus changes within a page must not cancel auto scrolling.
+  if (event.target === window) stopAutoScroll();
+});
 window.addEventListener("resize", positionContainer);
 document.addEventListener("fullscreenchange", syncFullscreenVisibility);
 document.addEventListener("webkitfullscreenchange", syncFullscreenVisibility);

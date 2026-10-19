@@ -11,12 +11,19 @@ Chrome MV3 extension for:
 - showing floating auto-scroll buttons with configurable opacity and site exclusions
 - previewing links in a movable popup after a long click, long hover, or link drag
 - translating dragged text selections into Korean when the drag ends with the browser's Language Detector and Translator APIs
-- downloading detected soft subtitles from the popup's separate **자막추출** tab
-- applying local subtitles to videos using the existing **자막** overlay tab
+- downloading detected soft subtitles and searching online under **자막 → 추출·검색**
+- applying local subtitles to videos under **자막 → 오버레이**, with timing offset and playback-rate correction
 - streaming subtitle translation into Korean using the browser's on-device Translator API, with a saved literal postprocessing dictionary
 - saving every subtitle display option, including built-in/installed fonts, text spacing, gradient fills, outlines, backgrounds, and shadows, with up to 20 named style presets
 - unlocking disabled `button` elements, closing newly opened tooltips and the Kiosk support popup, and showing detected `B/s)` download status text from `kio.ac` in the extension page `kiodownload.html`
 - persisting the YouTube, kone.gg decoder, and floating scroll settings across browser restarts
+
+Version **1.5.5** reorganizes settings and expands subtitle synchronization:
+
+- The Basic tab follows the requested action order. Floating-scroll settings can show a red center drag handle that shares the buttons' opacity without changing their layout; the old position-mode action is removed.
+- **자막** now contains **오버레이**, **스타일**, and **추출·검색**. Overlay timing adds a rate input, fine adjustments, reset, and six FPS presets, while preserving the offset and pending edits across tab changes.
+- Both auto-scroll speeds keep moving on pages and panels with smooth-scroll CSS. Internal element focus changes no longer cancel auto-scroll.
+- Cloudflare verification frames retain native fetch behavior without the subtitle probe, keeping their CSP checks out of the extension's fetch observer.
 
 Version **1.5.4** fixes edge cases in playback, translation, previews, and settings:
 
@@ -54,17 +61,19 @@ Version **1.3.4** refreshes kio.ac download detection every two seconds and lets
 
 No `tabs`, `scripting`, `activeTab`, `clipboardWrite`, `notifications`, or remote-code permissions are requested. Subtitle discovery and parsing run locally; downloading only requests the discovered resources from their original sites/CDNs. Subtitle bodies are kept in a bounded page-memory cache, and temporary discovery metadata is kept in extension session storage. Nothing is uploaded to a separate extraction service.
 
+Subtitle probing skips Cloudflare verification documents on `challenges.cloudflare.com` and its subdomains. Their native requests and CSP checks remain untouched, so their `data:,` connectivity tests are not attributed to the subtitle fetch observer.
+
 ## Link preview and selected-text translation
 
 In **기본**, open **팝업으로 링크 미리보기 설정 열기** below the kio.ac download-status button. Choose one activation gesture: long click, long hover, or link drag. Long-click and long-hover delays are saved in 50 ms steps. The preview toolbar groups **고정**, **확대**, **축소**, **최대화**, and **닫기** at the top. The close button is always available; closing by clicking outside is optional. **최대화** fills the page viewport rather than entering browser fullscreen. The popup can also be moved or resized.
 
-In **기본**, **드래그하여 번역 사용** enables translation and opens a compact setup popup inside the current HTTP(S) web page. Drag its top handle to uncover page content, and scroll inside the popup for the model controls. Choose a source language and click **언어 감지·번역 모델 함께 준비** to prepare both browser models in one action. Selecting text with a mouse drag opens a Korean translation tooltip when the drag ends. If a newly detected language needs a model, the tooltip offers a direct preparation button. Both APIs run in a browser extension frame inside the tab; selected text is not sent to Google Translate. API availability depends on the browser's model and policy state, which the setup popup reports.
+In **기본**, **드래그 하여 번역 사용** enables translation and opens a compact setup popup inside the current HTTP(S) web page. Drag its top handle to uncover page content, and scroll inside the popup for the model controls. Choose a source language and click **언어 감지·번역 모델 함께 준비** to prepare both browser models in one action. Selecting text with a mouse drag opens a Korean translation tooltip when the drag ends. If a newly detected language needs a model, the tooltip offers a direct preparation button. Both APIs run in a browser extension frame inside the tab; selected text is not sent to Google Translate. API availability depends on the browser's model and policy state, which the setup popup reports.
 
 In **기본**, **설정 내보내기** saves the persistent options, subtitle style, and postprocessing dictionary as JSON; **설정 불러오기** restores them. A PC-installed subtitle font is omitted from the file, and importing keeps the receiving PC's current font choice. Built-in extension font choices can be transferred.
 
 ## Soft-subtitle downloads
 
-Reload the extension and the playback page after upgrading. Open the site's player, enable its subtitles, then open the extension's **자막추출** tab. The list updates while the popup is open; **자막 다시 검색** also checks all player frames. Select a language and press **다운로드** to choose where to save the file. Reading and saving run in the background worker, so closing the popup does not cancel an already requested download.
+Reload the extension and the playback page after upgrading. Open the site's player, enable its subtitles, then open **자막 → 추출·검색** in the extension. The list updates while that subtab is open; **자막 다시 검색** also checks all player frames. Select a language and press **다운로드** to choose where to save the file. Reading and saving run in the background worker, so closing the popup does not cancel an already requested download.
 
 The engine observes HTML tracks, loaded native cues, player configuration/JSON, fetch/XHR responses, caption Blobs, renderer messages, and streaming manifests. It handles ordinary and nested player frames, shadow roots, opaque URLs, and CDN responses with misleading MIME types. Known chapter/storyboard/thumbnail tracks and non-subtitle bodies are excluded. No host-specific allowlist is used.
 
@@ -86,11 +95,17 @@ The native [Chrome Translator API](https://developer.chrome.com/docs/ai/translat
 
 For a translated language, **후처리 설정** opens a saved dictionary. Enter one `출력=후처리` rule per line, such as `플라스틱 뚜껑=플라흐타`. All literal matches in streaming/final translated text are replaced. Longer overlapping phrases take priority, and replacement text is not replaced again in the same pass. Dictionary edits also update the currently displayed translation. Original subtitles in **한국어(번역하지 않음)** are unaffected.
 
-In **자막추출**, **번역** reads the selected subtitle into a local in-memory file, selects it under **자막 파일**, switches to **자막**, and sets **언어** to English. Choose the correct source language if needed, then press **자막 적용**. Formats unsupported by the overlay are converted to VTT with their timing preserved. **다운로드** continues to save the original subtitle separately.
+In **자막 → 추출·검색**, **번역** reads the selected subtitle into a local in-memory file, selects it under **자막 파일**, switches to **오버레이**, and sets **언어** to English. Choose the correct source language if needed, then press **자막 적용**. Formats unsupported by the overlay are converted to VTT with their timing preserved. **다운로드** continues to save the original subtitle separately.
 
 Floating scroll defaults are **🔽 7.5**, **⏬ 45**, and **⬇️ 95%** of the scrollable distance. Previously saved custom speeds are preserved.
 
-The **자막** tab saves all display options automatically in extension local storage, even without a selected video. The saved style is restored when reopening the popup and applies to subsequent subtitles. Existing saved font selections are migrated. File selection and subtitle timing offsets remain specific to the current subtitle/video.
+In the floating-scroll settings, enable **플로팅 자동 스크롤 버튼 위치 조정 버튼 표시** to show a small red circle in the center gap. Drag it to reposition the controls. It shares the scroll buttons' opacity, and showing it keeps the four buttons' sizes and spacing unchanged.
+
+Auto-scroll uses immediate per-frame movement, including inside scrollable panels, so a site's smooth-scroll CSS cannot stop it after the first movement. Clicking outside the controls, switching away from the page/window, or starting a position drag stops auto-scroll; a page element losing focus does not stop it.
+
+The **자막** tab contains **오버레이**, **스타일**, and **추출·검색** subtabs. **스타일** saves all display options automatically in extension local storage, even without a selected video. The saved style is restored when reopening the popup and applies to subsequent subtitles. Existing saved font selections are migrated. File selection, subtitle timing offsets, and subtitle rates remain specific to the current subtitle/video.
+
+In **오버레이**, positive `offsetMs` delays subtitles and negative values advance them. The default `syncRate` is `1.000000`, and subtitle time is `(video.currentTime - offsetMs / 1000) * syncRate`. The rate input steps by `0.00001`; adjustment buttons change it by `±0.0001` or `±0.001`, and **초기화** restores `1.000000`. FPS presets are `0.95905`, `0.96000`, `0.99900`, `1.00100`, `1.04167`, and `1.04271`.
 
 The font selector includes **깔끔한** and **귀여운** groups with 11 supplied fonts, alongside **PC에 설치된 글꼴**. Eight font files ship with the extension; Binggrae, Moneygraphy Rounded, and Tmoney RoundWind load as web fonts and need an internet connection. See [font sources and licenses](fonts/README.md).
 

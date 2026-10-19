@@ -2,6 +2,7 @@
 
 const DEFAULT_SCROLL_SETTINGS = {
   enabled: true,
+  showPositionHandle: false,
   buttonSize: 72,
   opacity: 0.2,
   downSpeed: 7.5,
@@ -29,6 +30,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const enabledInput = document.querySelector("#enabled");
+const showPositionHandleInput = document.querySelector("#showPositionHandle");
 const buttonSizeInput = document.querySelector("#buttonSize");
 const opacityInput = document.querySelector("#opacity");
 const downSpeedInput = document.querySelector("#downSpeed");
@@ -59,6 +61,7 @@ function clampNumber(value, min, max, fallback) {
 function normalizeScrollSettings(value) {
   return {
     enabled: !value || value.enabled !== false,
+    showPositionHandle: Boolean(value && value.showPositionHandle === true),
     buttonSize: clampNumber(value && value.buttonSize, 20, 140, DEFAULT_SCROLL_SETTINGS.buttonSize),
     opacity: clampNumber(value && value.opacity, 0, 1, DEFAULT_SCROLL_SETTINGS.opacity),
     downSpeed: clampNumber(value && value.downSpeed, 0.25, 80, DEFAULT_SCROLL_SETTINGS.downSpeed),
@@ -108,6 +111,7 @@ function setControlsEnabled(enabled) {
 function collectSettings() {
   return normalizeScrollSettings({
     enabled: enabledInput.checked,
+    showPositionHandle: showPositionHandleInput.checked,
     buttonSize: buttonSizeInput.value,
     opacity: opacityInput.value,
     downSpeed: downSpeedInput.value,
@@ -135,7 +139,7 @@ function saveSoon(event) {
       try {
         const update = {};
         if (Object.keys(changedSettings).length) {
-          // The page can stay open while position mode or another settings page
+          // The page can stay open while a position drag or another settings page
           // changes storage. Merge only edited controls into the latest values.
           const stored = await chrome.storage.sync.get({ floatingScrollSettings: DEFAULT_SCROLL_SETTINGS });
           update.floatingScrollSettings = {
@@ -159,6 +163,7 @@ function render(settings, disabledSites) {
   const normalizedSettings = normalizeScrollSettings(settings);
   position = normalizedSettings.position;
   enabledInput.checked = normalizedSettings.enabled;
+  showPositionHandleInput.checked = normalizedSettings.showPositionHandle;
   buttonSizeInput.value = String(normalizedSettings.buttonSize);
   opacityInput.value = String(normalizedSettings.opacity);
   downSpeedInput.value = String(normalizedSettings.downSpeed);

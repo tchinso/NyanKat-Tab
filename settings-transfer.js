@@ -11,6 +11,7 @@
     enableDragHoverTranslation: false,
     floatingScrollSettings: {
       enabled: true,
+      showPositionHandle: false,
       downSpeed: 7.5,
       fastDownSpeed: 45,
       buttonSize: 72,
@@ -63,6 +64,7 @@
     const defaults = DEFAULT_SYNC.floatingScrollSettings;
     const result = { ...defaults, position: { ...defaults.position } };
     if (own(input, "enabled")) result.enabled = checkBoolean(input.enabled, "스크롤 사용");
+    if (own(input, "showPositionHandle")) result.showPositionHandle = checkBoolean(input.showPositionHandle, "스크롤 위치 조정 버튼 표시");
     for (const [key, min, max] of [
       ["downSpeed", 0.25, 80], ["fastDownSpeed", 0.25, 80],
       ["buttonSize", 20, 140], ["opacity", 0, 1]
