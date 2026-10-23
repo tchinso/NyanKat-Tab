@@ -103,7 +103,7 @@ test("import preserves the receiving PC font while applying other subtitle style
   assert.equal(destination.sync.enableDragHoverTranslation, false);
 });
 
-test("position handle visibility transfers and older backups default to hidden", async () => {
+test("position handle visibility transfers and older backups default to visible", async () => {
   const source = harness({ floatingScrollSettings: { enabled: true, showPositionHandle: true } });
   const file = await source.transfer.buildExport();
   assert.equal(file.sync.floatingScrollSettings.showPositionHandle, true);
@@ -112,7 +112,7 @@ test("position handle visibility transfers and older backups default to hidden",
   assert.equal(destination.sync.floatingScrollSettings.showPositionHandle, true);
   delete file.sync.floatingScrollSettings.showPositionHandle;
   const legacy = destination.transfer.parseImport(JSON.stringify(file));
-  assert.equal(legacy.sync.floatingScrollSettings.showPositionHandle, false);
+  assert.equal(legacy.sync.floatingScrollSettings.showPositionHandle, true);
   file.sync.floatingScrollSettings.showPositionHandle = "true";
   assert.throws(() => destination.transfer.parseImport(JSON.stringify(file)), /위치 조정 버튼 표시/);
 });

@@ -99,7 +99,7 @@ In **자막 → 추출·검색**, **번역** reads the selected subtitle into a 
 
 Floating scroll defaults are **🔽 7.5**, **⏬ 45**, and **⬇️ 95%** of the scrollable distance. Previously saved custom speeds are preserved.
 
-In the floating-scroll settings, enable **플로팅 자동 스크롤 버튼 위치 조정 버튼 표시** to show a small red circle in the center gap. Drag it to reposition the controls. It shares the scroll buttons' opacity, and showing it keeps the four buttons' sizes and spacing unchanged.
+In the floating-scroll settings, **플로팅 자동 스크롤 버튼 위치 조정 버튼 표시** is enabled by default to show a red circle in the center gap. Drag it to reposition the controls. It shares the scroll buttons' opacity. Thinner button backgrounds make room for the larger 24px handle while preserving the group dimensions and icon sizes.
 
 Auto-scroll uses immediate per-frame movement, including inside scrollable panels, so a site's smooth-scroll CSS cannot stop it after the first movement. Clicking outside the controls, switching away from the page/window, or starting a position drag stops auto-scroll; a page element losing focus does not stop it.
 

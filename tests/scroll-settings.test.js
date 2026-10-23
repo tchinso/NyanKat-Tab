@@ -76,9 +76,9 @@ test("editing scroll speed preserves a newly moved position and external site ex
   assert.deepEqual(Object.keys(h.writes[0]), ["floatingScrollSettings"]);
 });
 
-test("the position handle checkbox defaults off and saves without replacing current position", async () => {
+test("the position handle checkbox defaults on and saves without replacing current position", async () => {
   const h = harness();
-  assert.equal(h.elements.get("showPositionHandle").checked, false);
+  assert.equal(h.elements.get("showPositionHandle").checked, true);
   h.stored.floatingScrollSettings = { opacity: 0.65, position: { x: 0.3, y: 0.7 } };
   h.change("showPositionHandle", true);
   await h.flush();

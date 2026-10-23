@@ -2,7 +2,7 @@
 
 const DEFAULT_SCROLL_SETTINGS = {
   enabled: true,
-  showPositionHandle: false,
+  showPositionHandle: true,
   buttonSize: 72,
   opacity: 0.2,
   downSpeed: 7.5,
@@ -61,7 +61,7 @@ function clampNumber(value, min, max, fallback) {
 function normalizeScrollSettings(value) {
   return {
     enabled: !value || value.enabled !== false,
-    showPositionHandle: Boolean(value && value.showPositionHandle === true),
+    showPositionHandle: !value || value.showPositionHandle !== false,
     buttonSize: clampNumber(value && value.buttonSize, 20, 140, DEFAULT_SCROLL_SETTINGS.buttonSize),
     opacity: clampNumber(value && value.opacity, 0, 1, DEFAULT_SCROLL_SETTINGS.opacity),
     downSpeed: clampNumber(value && value.downSpeed, 0.25, 80, DEFAULT_SCROLL_SETTINGS.downSpeed),

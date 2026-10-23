@@ -3,7 +3,7 @@
 const FLOATING_SCROLL_DEFAULT_SETTINGS = {
   floatingScrollSettings: {
     enabled: true,
-    showPositionHandle: false,
+    showPositionHandle: true,
     buttonSize: 72,
     opacity: 0.2,
     downSpeed: 7.5,
@@ -60,7 +60,7 @@ function normalizeScrollSettings(value) {
   const defaultPosition = FLOATING_SCROLL_DEFAULT_SETTINGS.floatingScrollSettings.position;
   return {
     enabled: !value || value.enabled !== false,
-    showPositionHandle: Boolean(value && value.showPositionHandle === true),
+    showPositionHandle: !value || value.showPositionHandle !== false,
     buttonSize: clampNumber(
       value && value.buttonSize,
       FLOATING_SCROLL_MIN_SIZE,
@@ -510,7 +510,7 @@ function createPositionHandle() {
   button.setAttribute("aria-label", button.title);
   button.setAttribute("data-nyankat-position-handle", "true");
   // Stay outside the grid layout so the four scroll buttons keep their size
-  // and spacing. The small circle fits in the gap between their rounded corners.
+  // and spacing. The larger circle fits in the space freed by thinner button backgrounds.
   button.style.cssText = [
     "all:initial",
     "background:#ef4444",
@@ -519,7 +519,7 @@ function createPositionHandle() {
     "box-sizing:border-box",
     "cursor:grab",
     "display:block",
-    "height:12px",
+    "height:24px",
     "left:50%",
     "opacity:" + scrollSettings.opacity,
     "padding:0",
@@ -527,7 +527,7 @@ function createPositionHandle() {
     "top:50%",
     "touch-action:none",
     "transform:translate(-50%,-50%)",
-    "width:12px",
+    "width:24px",
     "z-index:1"
   ].join(";");
   button.addEventListener("pointerdown", beginPositionDrag);
@@ -550,6 +550,9 @@ function createButton(label, title, action) {
   button.setAttribute("aria-label", title);
   button.style.cssText = [
     "align-items:center",
+    "align-self:center",
+    "justify-self:center",
+    "box-sizing:border-box",
     "background:rgba(20,20,20,.84)",
     "border:1px solid rgba(255,255,255,.3)",
     "border-radius:10px",
@@ -559,13 +562,13 @@ function createButton(label, title, action) {
     "display:flex",
     "font-family:'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif",
     "font-size:" + Math.max(14, Math.round(scrollSettings.buttonSize * 0.58)) + "px",
-    "height:" + scrollSettings.buttonSize + "px",
+    "height:" + (scrollSettings.buttonSize - 6) + "px",
     "justify-content:center",
     "line-height:1",
     "opacity:" + scrollSettings.opacity,
     "padding:0",
     "touch-action:none",
-    "width:" + scrollSettings.buttonSize + "px"
+    "width:" + (scrollSettings.buttonSize - 6) + "px"
   ].join(";");
 
   button.addEventListener("pointerdown", (event) => {

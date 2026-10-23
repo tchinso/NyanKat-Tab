@@ -311,7 +311,7 @@ function inlineStyles(element) {
 }
 
 test("enabling the red position handle preserves all four scroll button sizes, spacing, and actions", () => {
-  const page = makePage();
+  const page = makePage("https://example.com", { floatingScrollSettings: { showPositionHandle: false } });
   assert.equal(page.handle(), null);
   const originalContainer = page.button().style.cssText;
   const originalButtons = page.button().children.map((button) => button.style.cssText);
@@ -334,8 +334,8 @@ test("enabling the red position handle preserves all four scroll button sizes, s
   assert.equal(style["border-radius"], "50%");
   assert.equal(style.background, "#ef4444");
   assert.equal(style.opacity, "0.65");
-  assert.equal(style.width, "12px");
-  assert.equal(style.height, "12px");
+  assert.equal(style.width, "24px");
+  assert.equal(style.height, "24px");
   page.button().children[1].dispatch("click");
   assert.equal(page.scrolls[0].top, 0, "scroll actions still run with the handle enabled");
   assert.equal(page.writes.length, 0);

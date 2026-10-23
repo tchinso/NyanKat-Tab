@@ -11,7 +11,7 @@
     enableDragHoverTranslation: false,
     floatingScrollSettings: {
       enabled: true,
-      showPositionHandle: false,
+      showPositionHandle: true,
       downSpeed: 7.5,
       fastDownSpeed: 45,
       buttonSize: 72,
@@ -39,6 +39,7 @@
   const DEFAULT_STYLE = window.NyanKatSubtitleStyle.DEFAULT_STYLE;
   const PORTABLE_FONTS = new Set([
     DEFAULT_STYLE.font,
+    '"Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif',
     ...window.NyanKatSubtitleStyle.FONT_GROUPS.flatMap(group =>
       group.fonts.map(font => window.NyanKatSubtitleStyle.fontValue(font.family)))
   ]);
