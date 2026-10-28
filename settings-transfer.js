@@ -171,7 +171,7 @@
     if (own(input, "subtitlePostprocessDictionary")) {
       const dictionary = input.subtitlePostprocessDictionary;
       if (typeof dictionary !== "string" || dictionary.length > window.NyanKatSubtitlePostprocess.MAX_DICTIONARY_CHARS ||
-          window.NyanKatSubtitlePostprocess.compile(dictionary).errors.length) invalid("자막 후처리 사전");
+          window.NyanKatSubtitlePostprocess.compile(dictionary).errors.length) invalid("자막 치환 목록");
       result.subtitlePostprocessDictionary = dictionary;
     }
     return result;

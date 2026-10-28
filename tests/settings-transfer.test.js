@@ -189,7 +189,7 @@ test("malformed files and unsupported values are rejected before storage changes
   document.local = { subtitleStyle: { font: '"Uninstalled PC Font"' } };
   assert.throws(() => h.transfer.parseImport(JSON.stringify(document)), /자막 글꼴/);
   document.local = { subtitlePostprocessDictionary: "invalid rule" };
-  assert.throws(() => h.transfer.parseImport(JSON.stringify(document)), /후처리 사전/);
+  assert.throws(() => h.transfer.parseImport(JSON.stringify(document)), /치환 목록/);
   document.local = { subtitleStylePresets: Array.from({ length: 21 }, (_, index) => ({
     id: "preset-" + index, name: "스타일 " + index, style: {}
   })) };

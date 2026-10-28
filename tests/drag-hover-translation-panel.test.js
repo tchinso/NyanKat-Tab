@@ -136,4 +136,7 @@ test("a failed popup setting save restores the checkbox and leaves an error stat
   assert.equal(control.checked, true);
   assert.equal(controls.get("#status").textContent, "저장 실패");
   assert.equal(timers.length, 0);
+  controls.get("#openDragHoverTranslationSettings").fire("click");
+  assert.match(controls.get("#status").textContent, /저장하지 못했습니다/);
+  assert.equal(timers.length, 0, "translation failures must not turn into a saved status later");
 });

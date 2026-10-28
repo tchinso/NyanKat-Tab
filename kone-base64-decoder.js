@@ -342,7 +342,7 @@ function createDecodedElement(encoded, decoded, depth) {
   if (depth > 1) {
     const badge = document.createElement("span");
     badge.textContent = depth + "차";
-    badge.title = depth + "차 디코딩";
+    badge.title = depth + "차 해독";
     badge.style.cssText = "color:#047857;font-size:11px;font-weight:700";
     wrapper.append(badge);
   }
@@ -365,7 +365,7 @@ function createDecodedElement(encoded, decoded, depth) {
     wrapper.append(text);
   }
 
-  wrapper.append(createCopyButton(decoded.trim(), "디코딩 결과 복사"));
+  wrapper.append(createCopyButton(decoded.trim(), "해독 결과 복사"));
 
   const toggleButton = document.createElement("button");
   toggleButton.type = "button";

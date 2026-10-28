@@ -18,6 +18,7 @@
   let translatorState = "checking";
   let detectorCheckId = 0;
   let translatorCheckId = 0;
+  let savedEnabled = false;
 
   function supported(api) {
     return api && typeof api.availability === "function" && typeof api.create === "function";
@@ -146,12 +147,28 @@
     translatorStatus.textContent = "번역: 상태 확인 중…";
     void checkTranslator();
   });
+  enabled.disabled = true;
   chrome.storage.sync.get({ enableDragHoverTranslation: false }, values => {
-    enabled.checked = values.enableDragHoverTranslation === true;
+    if (chrome.runtime.lastError) {
+      settingStatus.textContent = "설정을 불러오지 못했습니다. 다시 열어 주세요.";
+      return;
+    }
+    savedEnabled = values.enableDragHoverTranslation === true;
+    enabled.checked = savedEnabled;
+    enabled.disabled = false;
   });
   enabled.addEventListener("change", () => {
-    chrome.storage.sync.set({ enableDragHoverTranslation: enabled.checked }, () => {
-      settingStatus.textContent = chrome.runtime.lastError ? "설정을 저장하지 못했습니다." : "설정이 저장되었습니다.";
+    const value = enabled.checked;
+    enabled.disabled = true;
+    chrome.storage.sync.set({ enableDragHoverTranslation: value }, () => {
+      if (chrome.runtime.lastError) {
+        enabled.checked = savedEnabled;
+        settingStatus.textContent = "저장 실패";
+      } else {
+        savedEnabled = value;
+        settingStatus.textContent = "저장됨";
+      }
+      enabled.disabled = false;
     });
   });
   void checkDetector();

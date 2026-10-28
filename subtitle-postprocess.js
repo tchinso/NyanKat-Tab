@@ -17,7 +17,7 @@
       // Never interpret a truncated final line as a replacement rule.
       const lastNewline = source.lastIndexOf("\n", MAX_DICTIONARY_CHARS - 1);
       bounded = lastNewline < 0 ? "" : source.slice(0, lastNewline);
-      errors.push({ line: null, reason: "too-large", message: "후처리 사전은 65,536자까지 적용됩니다." });
+      errors.push({ line: null, reason: "too-large", message: "치환 목록은 최대 65,536자입니다." });
     }
     for (const [index, line] of bounded.split("\n").entries()) {
       if (!line.trim()) continue;
@@ -28,7 +28,7 @@
         continue;
       }
       if (rules.size >= MAX_ENTRIES && !rules.has(output)) {
-        errors.push({ line: index + 1, reason: "too-many-entries", message: "후처리 사전은 1,000개 항목까지 적용됩니다." });
+        errors.push({ line: index + 1, reason: "too-many-entries", message: "치환 규칙은 최대 1,000개입니다." });
         continue;
       }
       rules.set(output, line.slice(separator + 1).trim());

@@ -748,9 +748,9 @@
       await chrome.storage.local.set({ subtitlePostprocessDictionary: dictionary });
       postprocessDictionary = dictionary;
       postprocessDialog.close();
-      setStatus(compiled.count + "개의 후처리 규칙을 저장했습니다.");
+      setStatus("치환 규칙 " + compiled.count + "개 저장됨");
     } catch {
-      postprocessStatus.textContent = "후처리 사전을 저장하지 못했습니다. 다시 시도하세요.";
+      postprocessStatus.textContent = "치환 목록 저장 실패. 다시 시도하세요.";
     }
   });
 

@@ -1,6 +1,7 @@
 "use strict";
 
 importScripts("floating-scroll-sites.js", "subtitle-extractor.js", "subtitle-downloads.js", "subtitle-translation-router.js", "link-preview-background.js");
+importScripts("vendor/zxing/index.min.js", "qr-decoder.js");
 
 const DEFAULT_SETTINGS = {
   disableNewTabFavoritesRedirect: false,
@@ -101,15 +102,23 @@ function recreateContextMenus() {
     chrome.contextMenus.create({
       id: CONTEXT_MENU_BASE64_DECODE_ID,
       parentId: CONTEXT_MENU_ROOT_ID,
-      title: "Base64 디코딩",
+      title: "Base64 해독",
       contexts: ["selection"],
+      documentUrlPatterns: WEB_DOCUMENT_PATTERNS
+    });
+
+    chrome.contextMenus.create({
+      id: "nyankat-qr-decode",
+      parentId: CONTEXT_MENU_ROOT_ID,
+      title: "이 QR코드 해독",
+      contexts: ["image"],
       documentUrlPatterns: WEB_DOCUMENT_PATTERNS
     });
 
     chrome.contextMenus.create({
       id: CONTEXT_MENU_DISABLE_SCROLL_SITE_ID,
       parentId: CONTEXT_MENU_ROOT_ID,
-      title: "이 사이트를 스크롤 버튼 미사용 목록에 추가",
+      title: "이 사이트에서 스크롤 버튼 숨기기",
       contexts: PAGE_CONTEXTS,
       documentUrlPatterns: WEB_DOCUMENT_PATTERNS
     });
@@ -117,7 +126,7 @@ function recreateContextMenus() {
     chrome.contextMenus.create({
       id: CONTEXT_MENU_ENABLE_SCROLL_SITE_ID,
       parentId: CONTEXT_MENU_ROOT_ID,
-      title: "이 사이트를 스크롤 버튼 미사용 목록에서 제거",
+      title: "이 사이트에서 스크롤 버튼 허용",
       contexts: PAGE_CONTEXTS,
       documentUrlPatterns: WEB_DOCUMENT_PATTERNS
     });
@@ -544,7 +553,11 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+function handleContextMenuClick(info, tab) {
+  if (info.menuItemId === "nyankat-qr-decode" && Number.isInteger(tab?.id)) {
+    return NyanKatQR.handleClick(info, tab);
+  }
+
   if (info.menuItemId === CONTEXT_MENU_DISABLE_SCROLL_SITE_ID) {
     addFloatingScrollDisabledSite(getHostFromUrl(info.pageUrl || (tab && tab.url) || ""));
     return;
@@ -560,7 +573,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 
   sendBase64Result(tab.id, info.frameId, decodeBase64Repeatedly(info.selectionText || ""));
-});
+}
+
+chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId === 0 && details.tabId >= 0) {

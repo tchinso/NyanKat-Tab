@@ -43,7 +43,11 @@ function harness(options = {}) {
     runtime: { lastError: null },
     storage: { sync: {
       get(_defaults, callback) { callback({ enableDragHoverTranslation: false }); },
-      set(_value, callback) { callback(); }
+      set(_value, callback) {
+        chrome.runtime.lastError = options.saveFails ? { message: "quota" } : null;
+        callback();
+        chrome.runtime.lastError = null;
+      }
     } }
   };
   vm.runInNewContext(script, {
@@ -86,6 +90,22 @@ test("one preparation click starts detector and selected translation pair", asyn
   assert.equal(h.state.destroyed, 2);
   assert.match(h.elements.get("#detectorStatus").textContent, /준비되었습니다/);
   assert.match(h.elements.get("#translatorStatus").textContent, /준비되었습니다/);
+});
+
+test("failed translation toggle saves restore the stored state and allow retry", () => {
+  const options = { saveFails: true };
+  const h = harness(options);
+  const enabled = h.elements.get("#enabled");
+  enabled.checked = true;
+  enabled.trigger("change");
+  assert.equal(enabled.checked, false);
+  assert.equal(enabled.disabled, false);
+  assert.equal(h.elements.get("#settingStatus").textContent, "저장 실패");
+  options.saveFails = false;
+  enabled.checked = true;
+  enabled.trigger("change");
+  assert.equal(enabled.checked, true);
+  assert.equal(h.elements.get("#settingStatus").textContent, "저장됨");
 });
 
 test("failure of one download does not prevent the other model preparation", async () => {

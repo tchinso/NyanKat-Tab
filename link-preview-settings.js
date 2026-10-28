@@ -17,6 +17,8 @@ const options = document.querySelector("#previewOptions");
 const status = document.querySelector("#status");
 let settings = { ...DEFAULTS };
 let saveTimer = 0;
+let pendingChanges = {};
+let saveQueue = Promise.resolve();
 
 function normalizeTime(value, fallback) {
   const number = Number(value);
@@ -47,11 +49,24 @@ function render() {
   outsideClick.checked = settings.closeOnOutsideClick;
 }
 
-function save() {
+function save(key) {
+  pendingChanges[key] = settings[key];
+  status.textContent = "저장 중…";
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
-    chrome.storage.sync.set({ [KEY]: settings }, () => {
-      status.textContent = chrome.runtime.lastError ? "저장 실패" : "저장됨";
+    saveQueue = saveQueue.then(async () => {
+      const changes = pendingChanges;
+      pendingChanges = {};
+      if (!Object.keys(changes).length) return;
+      try {
+        // Keep changes made by another settings page or a settings import.
+        const stored = await chrome.storage.sync.get({ [KEY]: DEFAULTS });
+        await chrome.storage.sync.set({ [KEY]: { ...normalize(stored[KEY]), ...changes } });
+        status.textContent = Object.keys(pendingChanges).length ? "저장 중…" : "저장됨";
+      } catch {
+        pendingChanges = { ...changes, ...pendingChanges };
+        status.textContent = "저장 실패";
+      }
     });
   }, 100);
 }
@@ -63,25 +78,25 @@ chrome.storage.sync.get({ [KEY]: DEFAULTS }, (stored) => {
   enabled.addEventListener("change", () => {
     settings.enabled = enabled.checked;
     render();
-    save();
+    save("enabled");
   });
   for (const input of triggerInputs) {
     input.addEventListener("change", () => {
       if (!input.checked) return;
       settings.trigger = input.value;
       render();
-      save();
+      save("trigger");
     });
   }
   for (const [input, key] of [[clickTime, "longClickMs"], [hoverTime, "longHoverMs"]]) {
     input.addEventListener("change", () => {
       settings[key] = normalizeTime(input.value, DEFAULTS[key]);
       render();
-      save();
+      save(key);
     });
   }
   outsideClick.addEventListener("change", () => {
     settings.closeOnOutsideClick = outsideClick.checked;
-    save();
+    save("closeOnOutsideClick");
   });
 });

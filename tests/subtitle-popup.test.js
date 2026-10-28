@@ -227,12 +227,12 @@ async function savePreset(h, name) {
 }
 
 test("preset controls occupy the requested positions and the visibility checkbox is absent", () => {
-  const heading = popupHTML.indexOf("모든 스타일은 자동으로 저장되어 다음 자막에도 적용됩니다.");
+  const heading = popupHTML.indexOf("<h3>표시 스타일</h3>");
   const presetSelect = popupHTML.indexOf('id="subtitleStylePreset"');
   const firstStyleGroup = popupHTML.indexOf('class="subtitle-style-group"');
   const saveButton = popupHTML.indexOf('id="saveSubtitleStylePreset"');
   const status = popupHTML.indexOf('id="subtitleStatus"');
-  assert.ok(heading < presetSelect && presetSelect < firstStyleGroup);
+  assert.ok(heading >= 0 && heading < presetSelect && presetSelect < firstStyleGroup);
   assert.ok(saveButton < status);
   assert.doesNotMatch(popupHTML, /id="subtitleVisible"/);
 });

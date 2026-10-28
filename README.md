@@ -7,6 +7,7 @@ Chrome MV3 extension for:
 - falling back from `https://fav.ju.mp/` to `https://12tw.pages.dev/`, then to `https://tchinso.github.io/fav/` when navigation fails
 - sending a `0` key event after YouTube watch pages load
 - decoding selected Base64 text from the `NyanKatX3 Tab` right-click menu, including up to three nested Base64 layers
+- decoding image QR codes locally with bundled ZXing JavaScript 0.23.0 from the image right-click menu; HTTP(S) results open immediately in the current tab, while other content is shown as copyable text. Bare domain names use HTTPS. If the source tab has navigated during decoding, the URL opens in a new tab instead. HTTP(S) and image data URLs are supported (20MB / 32MP limit); inaccessible, blob, and unrecognized images show an error. No additional permissions or runtime CDN code are needed.
 - automatically decoding detected Base64 text on `kone.gg`, with nested decoding, clickable links, copy buttons, and original text reveal
 - showing floating auto-scroll buttons with configurable opacity and site exclusions
 - previewing links in a movable popup after a long click, long hover, or link drag
@@ -46,14 +47,14 @@ Version **1.3.4** refreshes kio.ac download detection every two seconds and lets
 
 ## Permissions
 
-- `contextMenus`: adds the `NyanKatX3 Tab > Base64 디코딩` menu for selected page text.
+- `contextMenus`: adds the `NyanKatX3 Tab > Base64 해독` menu for selected page text and `이 QR코드 해독` for images.
 - `storage`: saves the popup and floating-scroll settings, and keeps the temporary kio.ac detection snapshot in session storage.
 - `fontSettings`: lists fonts installed on the PC for the subtitle font selector.
 - `webNavigation`: detects failed top-level navigations to the primary and first fallback URLs.
 - `webRequest`: observes subtitle/manifest response URLs in the current tab, including embedded players and worker requests. It does not intercept video bodies.
 - `downloads`: saves validated subtitle files after the user presses **다운로드**.
 - `declarativeNetRequest`: while a link preview is open, removes frame-blocking response headers from subframe responses in that tab so linked pages can load and navigate inside the popup. The temporary rule is removed when the popup closes or the tab navigates.
-- `host_permissions` for HTTP(S): reads discovered subtitle files and subtitle manifests from their CDN origins.
+- `host_permissions` for HTTP(S): reads discovered subtitle files, subtitle manifests, and images explicitly selected for QR decoding from their origins.
 - `content_scripts.matches` for `https://www.youtube.com/*`: runs the YouTube watch-page helper.
 - `content_scripts.matches` for `https://kone.gg/*` and `https://*.kone.gg/*`: runs the automatic Base64 decoder only on kone.gg pages.
 - `content_scripts.matches` for `https://kio.ac/*` and `https://*.kio.ac/*`: unlocks disabled buttons, resets newly opened tooltip triggers, and detects `B/s)` text only on kio.ac pages.
@@ -65,9 +66,9 @@ Subtitle probing skips Cloudflare verification documents on `challenges.cloudfla
 
 ## Link preview and selected-text translation
 
-In **기본**, open **팝업으로 링크 미리보기 설정 열기** below the kio.ac download-status button. Choose one activation gesture: long click, long hover, or link drag. Long-click and long-hover delays are saved in 50 ms steps. The preview toolbar groups **고정**, **확대**, **축소**, **최대화**, and **닫기** at the top. The close button is always available; closing by clicking outside is optional. **최대화** fills the page viewport rather than entering browser fullscreen. The popup can also be moved or resized.
+In **기본**, open **링크 미리보기 설정** below the kio.ac download-status button. Choose one activation gesture: long click, long hover, or link drag. Long-click and long-hover delays are saved in 50 ms steps. The preview toolbar groups **고정**, **확대**, **축소**, **최대화**, and **닫기** at the top. The close button is always available; closing by clicking outside is optional. **최대화** fills the page viewport rather than entering browser fullscreen. The popup can also be moved or resized.
 
-In **기본**, **드래그 하여 번역 사용** enables translation and opens a compact setup popup inside the current HTTP(S) web page. Drag its top handle to uncover page content, and scroll inside the popup for the model controls. Choose a source language and click **언어 감지·번역 모델 함께 준비** to prepare both browser models in one action. Selecting text with a mouse drag opens a Korean translation tooltip when the drag ends. If a newly detected language needs a model, the tooltip offers a direct preparation button. Both APIs run in a browser extension frame inside the tab; selected text is not sent to Google Translate. API availability depends on the browser's model and policy state, which the setup popup reports.
+In **기본**, **드래그 번역 켜기** enables translation and opens a compact setup popup inside the current HTTP(S) web page. Drag its top handle to uncover page content, and scroll inside the popup for the model controls. Choose a source language and click **번역 준비** to prepare both browser models in one action. Selecting text with a mouse drag opens a Korean translation tooltip when the drag ends. If a newly detected language needs a model, the tooltip offers a direct preparation button. Both APIs run in a browser extension frame inside the tab; selected text is not sent to Google Translate. API availability depends on the browser's model and policy state, which the setup popup reports.
 
 In **기본**, **설정 내보내기** saves the persistent options, subtitle style, and postprocessing dictionary as JSON; **설정 불러오기** restores them. A PC-installed subtitle font is omitted from the file, and importing keeps the receiving PC's current font choice. Built-in extension font choices can be transferred.
 
@@ -99,7 +100,7 @@ In **자막 → 추출·검색**, **번역** reads the selected subtitle into a 
 
 Floating scroll defaults are **🔽 7.5**, **⏬ 45**, and **⬇️ 95%** of the scrollable distance. Previously saved custom speeds are preserved.
 
-In the floating-scroll settings, **플로팅 자동 스크롤 버튼 위치 조정 버튼 표시** is enabled by default to show a red circle in the center gap. Drag it to reposition the controls. It shares the scroll buttons' opacity. Thinner button backgrounds make room for the larger 24px handle while preserving the group dimensions and icon sizes.
+In the floating-scroll settings, **위치 조절 핸들 표시** is enabled by default to show a red circle in the center gap. Drag it to reposition the controls. It shares the scroll buttons' opacity. Thinner button backgrounds make room for the larger 24px handle while preserving the group dimensions and icon sizes.
 
 Auto-scroll uses immediate per-frame movement, including inside scrollable panels, so a site's smooth-scroll CSS cannot stop it after the first movement. Clicking outside the controls, switching away from the page/window, or starting a position drag stops auto-scroll; a page element losing focus does not stop it.
 

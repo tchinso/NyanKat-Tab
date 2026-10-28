@@ -23,7 +23,6 @@ const tabPanels = tabButtons.map(button => document.querySelector("#" + button.g
 const subtitleTabPanels = subtitleTabButtons.map(button => document.querySelector("#" + button.getAttribute("aria-controls")));
 const subtitleViews = ["overlay", "style", "extract"];
 const savedCheckboxValues = {};
-let statusTimer = 0;
 let currentSubtitleView = "overlay";
 let tabRevision = 0;
 const loadedScripts = new Map();
@@ -78,12 +77,7 @@ function ensureDownloadScripts() {
 }
 
 function setStatus(text) {
-  window.clearTimeout(statusTimer);
   statusElement.textContent = text;
-  if (text === "저장 실패") return;
-  statusTimer = window.setTimeout(() => {
-    statusElement.textContent = "저장됨";
-  }, 1800);
 }
 
 function saveSetting(key, value) {
