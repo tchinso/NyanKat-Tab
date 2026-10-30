@@ -3,8 +3,8 @@
 (() => {
   const DEFAULT_STYLE = Object.freeze({
     font: '"NyanKatOSeongAndHanEum", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif',
-    fontSize: 24,
-    verticalPosition: 90,
+    fontSize: 56, // 42pt in CSS pixels.
+    verticalPosition: 95,
     letterSpacing: 0,
     lineHeight: 1.35,
     color: "#ffffff",

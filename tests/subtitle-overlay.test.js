@@ -547,7 +547,7 @@ test("unloading releases video listeners and a reload observes the replacement t
   secondBox.offsetHeight = 140;
   secondObserver.callback();
   h.layout();
-  assert.equal(secondBox.style.marginTop, "522px", "late font or text resizing repositions the reloaded subtitle");
+  assert.equal(secondBox.style.marginTop, "551px", "late font or text resizing repositions the reloaded subtitle");
 });
 
 for (const failure of ["error", "disconnect"]) {
