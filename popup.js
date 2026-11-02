@@ -21,7 +21,7 @@ const tabButtons = Array.from(document.querySelectorAll("#settingsTabs [role='ta
 const subtitleTabButtons = Array.from(document.querySelectorAll("#subtitleTabs [role='tab']"));
 const tabPanels = tabButtons.map(button => document.querySelector("#" + button.getAttribute("aria-controls")));
 const subtitleTabPanels = subtitleTabButtons.map(button => document.querySelector("#" + button.getAttribute("aria-controls")));
-const subtitleViews = ["overlay", "style", "extract"];
+const subtitleViews = ["overlay", "style", "extract", "speech"];
 const savedCheckboxValues = {};
 let currentSubtitleView = "overlay";
 let tabRevision = 0;
@@ -113,12 +113,12 @@ function showTab(tabName, subtitleView) {
   selectTabGroup(subtitleTabButtons, subtitleTabPanels, subtitleViews.indexOf(currentSubtitleView));
   const viewName = tabName === "basic" ? "basic"
     : currentSubtitleView === "extract" ? "download"
-    : currentSubtitleView === "style" ? "style" : "subtitle";
+    : currentSubtitleView === "speech" ? "speech" : currentSubtitleView === "style" ? "style" : "subtitle";
   const detail = { tabName: viewName, subtitleView: currentSubtitleView };
   document.dispatchEvent(new CustomEvent("nyankat-popup-tab-changing", { detail }));
   const subtitleStatus = document.querySelector("#subtitleStatus");
-  subtitleStatus.hidden = tabName !== "subtitle" || currentSubtitleView === "extract";
-  const ready = viewName === "download" ? ensureDownloadScripts()
+  subtitleStatus.hidden = tabName !== "subtitle" || ["extract", "speech"].includes(currentSubtitleView);
+  const ready = viewName === "speech" ? loadScript("speech-popup.js") : viewName === "download" ? ensureDownloadScripts()
     : tabName === "subtitle" ? ensureSubtitleScripts() : Promise.resolve();
   void ready.then(() => {
     if (tabRevision === revision) {

@@ -71,6 +71,7 @@
           <button id="overlaySubtitleTab" class="tab-button" type="button" role="tab" aria-selected="true" aria-controls="overlaySubtitlePanel">오버레이</button>
           <button id="styleSubtitleTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="styleSubtitlePanel" tabindex="-1">스타일</button>
           <button id="extractSubtitleTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="downloadPanel" tabindex="-1">추출·검색</button>
+          <button id="speechSubtitleTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="speechPanel" tabindex="-1">음성인식</button>
         </nav>
 
         <section id="overlaySubtitlePanel" class="subtitle-subpanel" role="tabpanel" aria-labelledby="overlaySubtitleTab">
@@ -372,6 +373,19 @@
         <p id="downloadStatus" class="subtitle-status" aria-live="polite"></p>
         <a id="searchSubtitlesOnline" class="link-button external-subtitle-search" href="https://sub.h2h.workers.dev/" target="_blank" rel="noopener noreferrer">온라인 자막 검색</a>
       </section>
+        <section id="speechPanel" class="subtitle-subpanel" role="tabpanel" aria-labelledby="speechSubtitleTab" hidden>
+          <h2>일본어 음성 → 한국어 자막</h2>
+          <label for="speechVideo">자막을 표시할 동영상</label>
+          <select id="speechVideo" aria-label="음성인식 대상 동영상"></select>
+          <button id="speechRefresh" type="button">동영상 다시 검색</button>
+          <div class="subtitle-actions">
+            <button type="button" data-speech-action="prepare">음성 모델 준비</button>
+            <button type="button" data-speech-action="start" disabled>시작</button>
+            <button type="button" data-speech-action="stop" disabled>중지</button>
+            <button type="button" data-speech-action="clear">모델 캐시 삭제</button>
+          </div>
+          <p id="speechStatus" class="subtitle-status" aria-live="polite">음성 모델을 준비하세요.</p>
+        </section>
         <p id="subtitleStatus" class="subtitle-status" aria-live="polite">동영상을 다시 검색해 선택하세요.</p>
       </section>
     </main>

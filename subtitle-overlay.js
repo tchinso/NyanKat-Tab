@@ -175,6 +175,7 @@
       return;
     }
 
+    stopSpeech(record);
     stopCueUpdates(record);
     disconnectTranslation(record);
     unbindOverlayEvents(record);
@@ -563,6 +564,7 @@
   }
 
   function renderCue(record) {
+    if (record.speechSession) return;
     if (!record.overlay || !record.textBox || !record.cues.length) {
       return;
     }
@@ -656,7 +658,7 @@
           record.translationStatus = message.status;
           if (record.translationRequest && ["error", "unavailable"].includes(message.status?.state)) {
             record.rawTranslatedText = null;
-            setCueText(record, record.cues[record.currentCueIndex]?.text || "");
+            setCueText(record, record.speechText || record.cues[record.currentCueIndex]?.text || "");
           }
           return;
         }
@@ -667,7 +669,7 @@
         } else if (message.type === "error") {
           record.translationStatus = { state: "error", code: message.reason };
           record.rawTranslatedText = null;
-          setCueText(record, record.cues[record.currentCueIndex]?.text || "");
+          setCueText(record, record.speechText || record.cues[record.currentCueIndex]?.text || "");
           record.translationRequest = "";
         }
       });
@@ -675,7 +677,7 @@
         if (record.translationPort !== port) return;
         if (record.translationRequest) {
           record.rawTranslatedText = null;
-          setCueText(record, record.cues[record.currentCueIndex]?.text || "");
+          setCueText(record, record.speechText || record.cues[record.currentCueIndex]?.text || "");
         }
         record.translationPort = null;
         record.prefetchStartIndex = -1;
@@ -702,6 +704,7 @@
   }
 
   function updateLanguage(record, value) {
+    if (record.speechSession) return;
     const language = window.NyanKatSubtitleTranslation?.normalizeLanguage(value) || "ko";
     if (language !== record.sourceLanguage) disconnectTranslation(record);
     record.sourceLanguage = language;
@@ -893,6 +896,7 @@
     if (!cues.length) {
       return { ok: false, reason: "no_cues" };
     }
+    stopSpeech(record);
     if (!ensureOverlay(record)) {
       return { ok: false, reason: "overlay_unavailable" };
     }
@@ -915,6 +919,7 @@
   }
 
   function unloadSubtitle(record) {
+    stopSpeech(record);
     stopCueUpdates(record);
     disconnectTranslation(record);
     unbindOverlayEvents(record);
@@ -928,6 +933,54 @@
       record.textLayers = null;
     }
     return { ok: true, state: getState(record) };
+  }
+
+  function stopSpeech(record) {
+    if (!record.speechSession) return;
+    const session = record.speechSession;
+    record.speechSession = "";
+    record.speechText = "";
+    clearTimeout(record.speechTimer);
+    for (const event of ['pause', 'play', 'seeking', 'ended']) record.video.removeEventListener(event, record.speechHandler);
+    record.speechHandler = null;
+    chrome.runtime.sendMessage({ type: 'NYANKAT_SPEECH_CONTROL', session, stop: true }).catch(() => {});
+  }
+
+  function speechMessage(record, payload) {
+    if (payload.action === 'begin') {
+      unloadSubtitle(record);
+      if (!ensureOverlay(record)) return { ok: false };
+      record.speechSession = payload.session;
+      record.speechRevision = 0;
+      record.speechText = '';
+      record.rawTranslatedText = null;
+      record.sourceLanguage = 'ja';
+      applyStyle(record);
+      connectTranslation(record);
+      record.speechHandler = () => {
+        record.speechRevision++;
+        record.speechText = ''; record.rawTranslatedText = null;
+        clearTimeout(record.speechTimer);
+        cancelTranslation(record); setCueText(record, '');
+        chrome.runtime.sendMessage({ type: 'NYANKAT_SPEECH_CONTROL', session: record.speechSession,
+          revision: record.speechRevision, paused: record.video.paused || record.video.ended,
+          stop: record.video.ended }).catch(() => {});
+      };
+      for (const event of ['pause', 'play', 'seeking', 'ended']) record.video.addEventListener(event, record.speechHandler);
+      return { ok: true };
+    }
+    if (record.speechSession !== payload.session) return { ok: false };
+    if (payload.action === 'end') { unloadSubtitle(record); return { ok: true }; }
+    if (payload.action === 'text' && payload.revision === record.speechRevision && !record.video.paused && !record.video.ended) {
+      clearTimeout(record.speechTimer); cancelTranslation(record);
+      record.speechText = String(payload.text || ''); record.rawTranslatedText = null;
+      setCueText(record, record.speechText);
+      requestTranslation(record, record.speechText);
+      record.speechTimer = setTimeout(() => {
+        cancelTranslation(record); record.speechText = ''; record.rawTranslatedText = null; setCueText(record, '');
+      }, 12000);
+    }
+    return { ok: true };
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -967,6 +1020,11 @@
 
     if (message.type === "NYANKAT_SUBTITLE_GET_STATUS") {
       sendResponse({ ok: true, state: getState(record) });
+      return;
+    }
+
+    if (message.type === 'NYANKAT_SUBTITLE_SPEECH') {
+      sendResponse(speechMessage(record, payload));
       return;
     }
 

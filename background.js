@@ -1,5 +1,7 @@
 "use strict";
 
+importScripts("speech-background.js");
+
 importScripts("floating-scroll-sites.js", "subtitle-extractor.js", "subtitle-downloads.js", "subtitle-translation-router.js", "link-preview-background.js");
 importScripts("vendor/zxing/index.min.js", "qr-decoder.js");
 

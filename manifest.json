@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NyanKatX3 Tab",
-  "version": "1.5.6",
+  "version": "1.6.0",
   "description": "New tab redirect, link previews, on-device translation, subtitles, Base64 and QR decoding, auto-scroll, and kio.ac downloads.",
   "icons": {
     "16": "icon16.png",
@@ -24,6 +24,8 @@
     "service_worker": "background.js"
   },
   "permissions": [
+    "tabCapture",
+    "offscreen",
     "contextMenus",
     "fontSettings",
     "storage",
@@ -33,6 +35,9 @@
     "declarativeNetRequest"
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],

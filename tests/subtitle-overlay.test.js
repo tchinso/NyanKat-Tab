@@ -95,7 +95,7 @@ async function harness(options = {}) {
   };
   window.top = options.embedded ? {} : window;
   const chrome = {
-    runtime: { onMessage: event(), getURL: file => "chrome-extension://test/" + file, connect() {
+    runtime: { sendMessage: async () => ({}), onMessage: event(), getURL: file => "chrome-extension://test/" + file, connect() {
       const port = { onMessage: event(), onDisconnect: event(), messages: [],
         postMessage(message) { this.messages.push(plain(message)); },
         disconnect() { this.disconnected = true; this.onDisconnect.emit(); } };
@@ -114,7 +114,7 @@ async function harness(options = {}) {
     window, document, chrome, HTMLVideoElement: Video,
     HTMLMediaElement: { HAVE_NOTHING: 0, HAVE_CURRENT_DATA: 2 },
     Node: { ELEMENT_NODE: 1, DOCUMENT_NODE: 9, DOCUMENT_FRAGMENT_NODE: 11 },
-    MutationObserver: Observer, ResizeObserver, TextDecoder,
+    MutationObserver: Observer, ResizeObserver, TextDecoder, setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
     atob: value => Buffer.from(value, "base64").toString("binary")
   });
   vm.runInContext(read("subtitle-style.js"), context);
@@ -149,6 +149,31 @@ const customStyle = {
   background: "pill", bgColor: "#445566", bgBorderColor: "#abcdef", bgPadding: 24, bgBorderWidth: 5, bgOpacity: 0.37,
   textShadow: true, shadowColor: "#fedcba", shadowBlur: 15, shadowX: -12, shadowY: 18, visible: true
 };
+
+test('live speech uses translation and style, invalidates seeks, and yields to file subtitles', async () => {
+  const h = await harness({ saved: { subtitleStyle: customStyle } });
+  h.video.paused = false;
+  const speech = payload => h.message('NYANKAT_SUBTITLE_SPEECH', { session: 's1', revision: 0, ...payload });
+  assert.equal(speech({ action: 'begin' }).ok, true);
+  speech({ action: 'text', text: 'こんにちは' });
+  assert.equal(h.layer('fill').textContent, 'こんにちは');
+  const port = h.translationPorts.at(-1);
+  const request = port.messages.findLast(m => m.type === 'translate');
+  assert.equal(request.sourceLanguage, 'ja');
+  port.onMessage.emit({ type: 'done', requestId: request.requestId, text: '안녕하세요' });
+  assert.equal(h.layer('fill').textContent, '안녕하세요');
+  assert.equal(h.layer('overlay').style['--nyankat-subtitle-font-size'], '63px');
+  h.video.emit('seeking');
+  speech({ action: 'text', text: 'stale' });
+  assert.equal(h.layer('fill').textContent, '');
+  speech({ action: 'text', revision: 1, text: '新しい' });
+  assert.equal(h.layer('fill').textContent, '新しい');
+  h.load();
+  speech({ action: 'text', revision: 1, text: 'stale after file' });
+  assert.equal(h.layer('fill').textContent, 'Hello & 한글\nsecond line');
+  assert.equal(speech({ action: 'end' }).ok, false);
+  assert.ok(h.layer('overlay'), 'late session end must not remove file subtitles');
+});
 
 test("gradient fill, double outline, background opacity and shadow render independently", async () => {
   const h = await harness({ saved: { subtitleStyle: customStyle } });

@@ -1,5 +1,7 @@
 # NyanKatX3 Tab
 
+Current release: **1.6.0**.
+
 Chrome MV3 extension for:
 
 - replacing the new tab page with `https://fav.ju.mp/`
@@ -87,6 +89,39 @@ The engine observes HTML tracks, loaded native cues, player configuration/JSON, 
 Each fetched resource is limited to 4 MiB; gathered subtitles are limited to 24 MiB. The engine validates timed content before saving, retries transient CDN errors, preserves the originating player context when reading captions, and clears stale discoveries on navigation. Sites that block a request may require enabling the desired caption language so the player loads it first.
 
 Run the automated checks with `node --test`. See the [1.3.3 installed-extension verification](tests/fixtures/subtitle-sites/verification-2026-10-10.md) for extraction, actual downloads, native Korean overlays, and the remaining live-site limits across ten sites. Earlier [mechanism observations](tests/fixtures/subtitle-sites/README.md) document the sanitized player structures.
+
+## Japanese speech subtitles
+
+Open **자막 → 음성인식** (to the right of **추출·검색**), select a video,
+press **음성 모델 준비**, and wait for preparation to finish before pressing
+**시작**. The first preparation downloads approximately 656 MB into the extension's
+Cache Storage. Subsequent preparations reuse that cache. **중지** releases the
+capture and model worker; **모델 캐시 삭제** also removes downloaded speech models.
+The popup can close while recognition continues.
+
+The fixed pipeline is Japanese Parakeet 0.6B INT8 CTC → Japanese text → the existing
+browser Translator API → Korean overlay. If the translation model needs setup,
+click **번역 모델 준비** in the frame shown over the playback page. Japanese is
+shown while translation is unavailable. Existing subtitle styles and the Korean
+postprocessing dictionary apply. Starting speech replaces the selected video's
+file subtitles; applying a subtitle file stops speech recognition for that video.
+
+The extension captures all audio in the selected tab, not an isolated video track.
+Only one tab can be recognized at a time. Pausing clears queued speech; resuming
+restarts segmentation. Seeks discard stale audio and translation results. Closing
+or navigating the target page stops capture. Silence detection is amplitude-based;
+background music can affect segmentation and transcription. Processing uses local
+WASM SIMD with one thread; audio is not uploaded. Segment collection, inference,
+and translation introduce delay, and slower machines may skip queued segments.
+
+`tabCapture` and `offscreen` permissions support capture after an explicit start;
+the local WASM runtime requires `wasm-unsafe-eval` in the extension CSP. Capture
+plays the original tab audio through an AudioContext so the video remains audible.
+Model URLs are pinned to revisions in `speech-core.mjs`. Attribution, runtime
+license, and browser measurements are in [the probe documentation](tools/speech-probe/README.md)
+and [the runtime notice](vendor/onnxruntime/README.md). These speech models originate
+from NVIDIA NeMo (CC BY 4.0), with CTC conversion by sherpa-onnx and frontend export
+by visuall. No RealTimeSubtitle source code is incorporated.
 
 ## Subtitle display styles
 
