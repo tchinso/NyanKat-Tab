@@ -15,6 +15,7 @@
     closeOnOutsideClick: false
   };
   let settings = { ...DEFAULTS };
+  let settingsChanged = false;
   let host = null;
   let panel = null;
   let frame = null;
@@ -391,10 +392,11 @@
   }
 
   chrome.storage.sync.get({ [STORAGE_KEY]: DEFAULTS }, (stored) => {
-    if (!chrome.runtime.lastError) settings = normalizeSettings(stored[STORAGE_KEY]);
+    if (!chrome.runtime.lastError && !settingsChanged) settings = normalizeSettings(stored[STORAGE_KEY]);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "sync" || !changes[STORAGE_KEY]) return;
+    settingsChanged = true;
     settings = normalizeSettings(changes[STORAGE_KEY].newValue);
     clearGesture();
     if (!settings.enabled && isTopFrame) closePreview();

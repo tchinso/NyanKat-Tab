@@ -9,6 +9,45 @@ const vm = require("node:vm");
 const contentScript = fs.readFileSync(path.join(__dirname, "..", "drag-hover-translation.js"), "utf8");
 const popupScript = fs.readFileSync(path.join(__dirname, "..", "popup.js"), "utf8");
 
+test("late startup settings cannot re-enable drag translation after disabling", () => {
+  const listeners = new Map();
+  const timers = [];
+  let initialSettings;
+  let settingsListener;
+  const document = {
+    documentElement: {},
+    addEventListener(name, callback) {
+      if (!listeners.has(name)) listeners.set(name, []);
+      listeners.get(name).push(callback);
+    }
+  };
+  const window = { addEventListener() {} };
+  const chrome = {
+    runtime: { getURL: name => "chrome-extension://example/" + name, onMessage: { addListener() {} } },
+    storage: {
+      sync: { get(_defaults, callback) { initialSettings = callback; } },
+      onChanged: { addListener(callback) { settingsListener = callback; } }
+    }
+  };
+  vm.runInNewContext(contentScript, {
+    chrome, document, window, URL, AbortController,
+    MutationObserver: class { observe() {} },
+    clearTimeout() {}, setTimeout(callback) { timers.push(callback); return timers.length; }
+  });
+  settingsListener({ enableDragHoverTranslation: { newValue: false } }, "sync");
+  initialSettings({ enableDragHoverTranslation: true });
+  const emit = (name, x) => {
+    for (const callback of listeners.get(name) || []) callback({ button: 0, clientX: x, clientY: 0, target: {} });
+  };
+  emit("mousedown", 0);
+  emit("mouseup", 10);
+  assert.equal(timers.length, 0);
+  settingsListener({ enableDragHoverTranslation: { newValue: true } }, "sync");
+  emit("mousedown", 0);
+  emit("mouseup", 10);
+  assert.equal(timers.length, 1, "a later explicit enable still activates selection capture");
+});
+
 function element(tag) {
   const listeners = new Map();
   return {

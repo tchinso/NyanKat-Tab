@@ -25,6 +25,10 @@
     (language.pinned ? elements.language : otherLanguages).append(option);
   }
   if (otherLanguages.children.length) elements.language.append(otherLanguages);
+  const unknownLanguage = document.createElement("option");
+  unknownLanguage.value = "";
+  unknownLanguage.textContent = "언어를 선택하세요 (자동 판별 불가)";
+  elements.language.append(unknownLanguage);
   const controlIds = {
     font: "subtitleFont", fontSize: "subtitleFontSize",
     letterSpacing: "subtitleLetterSpacing", lineHeight: "subtitleLineHeight",
@@ -62,9 +66,15 @@
   let selectedPresetId = "";
   let presetsLoaded = false;
   let importedFile = null;
+  let archive = null;
+  let fileRevision = 0;
+  const archiveFields = document.querySelector("#subtitleArchiveFields");
+  const archiveEntry = document.querySelector("#subtitleArchiveEntry");
+  const fpsFields = document.querySelector("#subtitleFpsFields");
+  const fpsInput = document.querySelector("#subtitleFps");
   let languageTouched = false;
+  let languageRevision = 0;
   let videoRefresh = Promise.resolve();
-  let postprocessDictionary = "";
   const postprocessButton = document.querySelector("#subtitlePostprocessSettings");
   const postprocessDialog = document.querySelector("#subtitlePostprocessDialog");
   const postprocessInput = document.querySelector("#subtitlePostprocessDictionary");
@@ -75,13 +85,18 @@
   const presetDialog = document.querySelector("#subtitleStylePresetDialog");
   const presetName = document.querySelector("#subtitleStylePresetName");
   const presetError = document.querySelector("#subtitleStylePresetError");
-  const postprocessReady = chrome.storage.local.get("subtitlePostprocessDictionary").then(result => {
-    postprocessDictionary = typeof result.subtitlePostprocessDictionary === "string"
-      ? result.subtitlePostprocessDictionary.slice(0, 65536) : "";
-  }).catch(() => {});
+  const glossaryInput = document.querySelector("#subtitleSourceGlossary");
+  const dictionaryTools = window.NyanKatSubtitleDictionary;
+  const dictionaryUsage = document.querySelector("#subtitleDictionaryUsage");
+  const dictionarySave = document.querySelector("#saveSubtitlePostprocess");
+  const dictionaryClear = document.querySelector("#clearSubtitleDictionaries");
+  let dictionaryBusy = false;
 
   function updateLanguageFields() {
-    postprocessButton.hidden = elements.language.value === "ko";
+    const hidden = !elements.language.value || elements.language.value === "ko";
+    document.querySelector("#subtitleTranslationSettings").hidden = hidden;
+    postprocessButton.hidden = hidden;
+    if (hidden && postprocessDialog.open) postprocessDialog.close();
   }
   updateLanguageFields();
 
@@ -515,19 +530,36 @@
 
   async function loadSubtitle() {
     await styleReady;
-    const file = elements.file.files?.[0] || importedFile;
+    const file = importedFile || elements.file.files?.[0];
     if (!file) {
       setStatus("자막 파일을 선택하세요.");
       return;
     }
-
-    let b64;
-    try {
-      b64 = arrayBufferToBase64(await file.arrayBuffer());
-    } catch {
-      setStatus("자막 파일을 읽지 못했습니다.");
+    if (/\.zip$/i.test(file.name)) {
+      setStatus("ZIP 안의 자막 파일을 선택하세요.");
       return;
     }
+    if (!elements.language.value) {
+      setStatus("원문 언어를 판별하지 못했습니다. 자막 원문 언어를 선택하세요.");
+      elements.language.focus?.();
+      return;
+    }
+
+    let b64;
+    const selectionVersion = fileRevision;
+    try {
+      if (file.size > window.NyanKatSubtitleArchive.MAX_FILE_BYTES) throw new Error("자막 파일은 8 MiB 이하만 열 수 있습니다.");
+      const buffer = await file.arrayBuffer();
+      const parser = window.NyanKatSubtitleParser;
+      const format = parser.guessFormatByFilename(file.name);
+      const cues = parser.parse(format, parser.decode(buffer, elements.encoding.value), { fps: Number(fpsInput.value) });
+      if (!cues.length) throw new Error("자막 구간을 읽지 못했습니다.");
+      b64 = arrayBufferToBase64(buffer);
+    } catch (error) {
+      if (selectionVersion === fileRevision) setStatus(error.message || "자막 파일을 읽지 못했습니다.");
+      return;
+    }
+    if (selectionVersion !== fileRevision) return;
 
     setStatus("자막을 적용하는 중…");
     const target = getSelectedTarget();
@@ -536,6 +568,7 @@
       b64,
       filename: file.name,
       encoding: elements.encoding.value,
+      fps: Number(fpsInput.value) || null,
       sourceLanguage: elements.language.value,
       offsetMs: Number(elements.offset.value) || 0,
       syncRate: normalizeSyncRate(elements.syncRate.value),
@@ -557,11 +590,12 @@
   }
 
   async function updateLanguage() {
+    languageRevision += 1;
     updateLanguageFields();
     languageTouched = true;
     const revision = ++uiRevision;
     const target = getSelectedTarget();
-    if (!target) return;
+    if (!target || !elements.language.value) return;
     const response = await sendToSelectedTarget("NYANKAT_SUBTITLE_SET_LANGUAGE", {
       sourceLanguage: elements.language.value
     });
@@ -571,9 +605,13 @@
       : "자막 언어를 변경하지 못했습니다.");
   }
 
-  async function importExtractedSubtitle({ text, filename, partial, file }) {
+  async function importExtractedSubtitle({ text, filename, partial, file, track = {} }) {
     if (typeof text !== "string" || !text.trim()) return false;
     importedFile = file || new File([text], filename || "subtitle.vtt", { type: "text/plain;charset=utf-8" });
+    fileRevision += 1;
+    archive = null;
+    archiveFields.hidden = true;
+    fpsFields.hidden = true;
     const name = document.querySelector("#subtitleImportedFileName");
     try {
       const transfer = new DataTransfer();
@@ -587,16 +625,100 @@
       name.hidden = false;
     }
     elements.encoding.value = "utf-8";
-    elements.language.value = "en";
+    const parser = window.NyanKatSubtitleParser;
+    const cues = parser.parse(parser.guessFormatByFilename(importedFile.name), text);
+    const detected = window.NyanKatSubtitleContext.resolveLanguage(track, cues);
+    elements.language.value = detected.language;
     updateLanguageFields();
     languageTouched = true;
     uiRevision += 1;
     window.NyanKatPopup?.showTab("subtitle", "overlay");
     await videoRefresh;
     setStatus((partial ? "로드된 구간만 가져왔습니다. " : "자막 파일을 가져왔습니다. ") +
-      "언어를 영어로 설정했습니다. 대상 동영상을 선택한 뒤 ‘자막 적용’을 누르세요.");
+      (detected.language ? "원문 언어를 " + languages.find(item => item.value === detected.language)?.label + "로 설정했습니다. " : "원문 언어를 선택하세요. ") +
+      "대상 동영상을 선택한 뒤 ‘자막 적용’을 누르세요.");
     return true;
   }
+
+  async function inspectFile(file, version) {
+    if (!file) return;
+    const languageVersion = languageRevision;
+    if (file.size > window.NyanKatSubtitleArchive.MAX_FILE_BYTES) throw new Error("자막 파일은 8 MiB 이하만 열 수 있습니다.");
+    const buffer = await file.arrayBuffer();
+    if (version !== fileRevision) return;
+    const parser = window.NyanKatSubtitleParser;
+    const text = parser.decode(buffer, elements.encoding.value);
+    const microDvd = /\.sub$/i.test(file.name) || /^\s*\{\d+\}\{\d*\}/m.test(text);
+    fpsFields.hidden = !microDvd;
+    fpsInput.disabled = false;
+    if (microDvd) {
+      const info = parser.microDvdInfo(text);
+      fpsInput.value = info.fps ? String(info.fps) : "";
+      fpsInput.disabled = Boolean(info.fps);
+      if (!info.fps) setStatus("MicroDVD 자막에 FPS가 없습니다. 원본 FPS를 입력하세요.");
+    }
+    let cues;
+    try { cues = parser.parse(parser.guessFormatByFilename(file.name), text, { fps: microDvd ? Number(fpsInput.value) || 25 : undefined }); }
+    catch { return; }
+    if (languageVersion === languageRevision) {
+      elements.language.value = window.NyanKatSubtitleContext.resolveLanguage({}, cues).language;
+      updateLanguageFields();
+    }
+  }
+
+  async function selectFile() {
+    const version = ++fileRevision;
+    uiRevision += 1;
+    languageTouched = true;
+    importedFile = null;
+    archive = null;
+    archiveFields.hidden = true;
+    fpsFields.hidden = true;
+    document.querySelector("#subtitleImportedFileName").hidden = true;
+    const file = elements.file.files?.[0];
+    if (!file) return;
+    try {
+      if (/\.zip$/i.test(file.name)) {
+        if (file.size > window.NyanKatSubtitleArchive.MAX_ARCHIVE_BYTES) throw new Error("ZIP은 32 MiB 이하만 열 수 있습니다.");
+        const buffer = await file.arrayBuffer();
+        if (version !== fileRevision) return;
+        archive = window.NyanKatSubtitleArchive.open(buffer);
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "자막 파일을 선택하세요";
+        archiveEntry.replaceChildren(placeholder);
+        for (const entry of archive.entries) {
+          const option = document.createElement("option");
+          option.value = String(entry.id);
+          option.textContent = entry.name + " · " + (entry.size / 1024).toFixed(1) + " KiB" + (entry.unavailable ? " · " + entry.unavailable : "");
+          option.disabled = Boolean(entry.unavailable);
+          archiveEntry.append(option);
+        }
+        archiveFields.hidden = false;
+        setStatus(archive.entries.length ? "ZIP 안에서 적용할 자막을 선택하세요." : "ZIP 안에 지원하는 자막 파일이 없습니다.");
+      } else {
+        await inspectFile(file, version);
+      }
+    } catch (error) { if (version === fileRevision) setStatus(error.message); }
+  }
+
+  archiveEntry.addEventListener("change", async () => {
+    const version = ++fileRevision;
+    uiRevision += 1;
+    languageTouched = true;
+    importedFile = null;
+    fpsFields.hidden = true;
+    if (!archive || archiveEntry.value === "") return;
+    const entry = archive.entries.find(item => item.id === Number(archiveEntry.value));
+    if (!entry) return;
+    try {
+      const buffer = await archive.extract(entry.id);
+      if (version !== fileRevision) return;
+      importedFile = new File([buffer], entry.name.split(/[\\/]/).pop(), { type: "text/plain" });
+      setStatus(entry.name + " 자막을 선택했습니다.");
+      await inspectFile(importedFile, version);
+    } catch (error) { if (version === fileRevision) setStatus(error.message); }
+  });
 
   async function unloadSubtitle() {
     const target = getSelectedTarget();
@@ -724,35 +846,70 @@
   elements.syncRate.addEventListener("input", queueRateUpdate);
   elements.syncRate.addEventListener("change", queueRateUpdate);
   elements.language.addEventListener("change", () => { void updateLanguage(); });
-  elements.file.addEventListener("change", () => {
-    importedFile = null;
-    document.querySelector("#subtitleImportedFileName").hidden = true;
+  elements.file.addEventListener("change", () => { void selectFile(); });
+  elements.encoding.addEventListener("change", () => {
+    const file = importedFile || elements.file.files?.[0];
+    if (file && !/\.zip$/i.test(file.name)) void inspectFile(file, ++fileRevision).catch(error => setStatus(error.message));
   });
-  postprocessButton.addEventListener("click", async () => {
-    await postprocessReady;
-    postprocessInput.value = postprocessDictionary;
-    postprocessStatus.textContent = "";
-    postprocessDialog.showModal();
-  });
+  function updateDictionaryUsage() {
+    const bytes = dictionaryTools.byteLength(glossaryInput.value) + dictionaryTools.byteLength(postprocessInput.value);
+    dictionaryUsage.textContent = "전처리·후처리 합계 " + (bytes / 1024).toFixed(2) + " / 10 KiB (UTF-8)";
+    dictionarySave.disabled = dictionaryBusy || bytes > dictionaryTools.MAX_BYTES;
+    dictionaryClear.disabled = dictionaryBusy;
+  }
+  async function openDictionaries(focus) {
+    if (dictionaryBusy) return;
+    try {
+      const saved = await chrome.storage.local.get(["subtitleSourceGlossary", "subtitlePostprocessDictionary"]);
+      glossaryInput.value = typeof saved.subtitleSourceGlossary === "string" ? saved.subtitleSourceGlossary : "";
+      postprocessInput.value = typeof saved.subtitlePostprocessDictionary === "string" ? saved.subtitlePostprocessDictionary : "";
+      postprocessStatus.textContent = "";
+      updateDictionaryUsage();
+      if (!postprocessDialog.open) postprocessDialog.showModal();
+      focus.focus();
+    } catch { setStatus("저장된 사전을 읽지 못했습니다."); }
+  }
+  postprocessButton.addEventListener("click", () => { void openDictionaries(postprocessInput); });
+  document.querySelector("#subtitlePreprocessSettings").addEventListener("click", () => { void openDictionaries(glossaryInput); });
+  for (const input of [glossaryInput, postprocessInput]) input.addEventListener("input", updateDictionaryUsage);
   document.querySelector("#cancelSubtitlePostprocess").addEventListener("click", () => postprocessDialog.close());
-  document.querySelector("#subtitlePostprocessForm").addEventListener("submit", async event => {
-    event.preventDefault();
-    const dictionary = postprocessInput.value;
-    const compiled = window.NyanKatSubtitlePostprocess.compile(dictionary);
-    if (compiled.errors?.length) {
-      const problem = compiled.errors[0];
-      postprocessStatus.textContent = (problem.line ? problem.line + "행: " : "") + problem.message;
+  async function saveDictionaries(clear = false) {
+    if (dictionaryBusy) return;
+    const pre = clear ? "" : glossaryInput.value;
+    const post = clear ? "" : postprocessInput.value;
+    if (!dictionaryTools.validateSize(pre, post)) {
+      postprocessStatus.textContent = "전처리·후처리 사전은 합계 10 KiB까지 저장할 수 있습니다.";
       return;
     }
-    try {
-      await chrome.storage.local.set({ subtitlePostprocessDictionary: dictionary });
-      postprocessDictionary = dictionary;
-      postprocessDialog.close();
-      setStatus("치환 규칙 " + compiled.count + "개 저장됨");
-    } catch {
-      postprocessStatus.textContent = "치환 목록 저장 실패. 다시 시도하세요.";
+    const compiledPre = window.NyanKatSubtitleGlossary.compile(pre);
+    const compiledPost = window.NyanKatSubtitlePostprocess.compile(post);
+    for (const [label, compiled] of [["전처리", compiledPre], ["후처리", compiledPost]]) {
+      if (compiled.errors.length) {
+        const problem = compiled.errors[0];
+        postprocessStatus.textContent = label + " 사전 " + (problem.line ? problem.line + "행: " : "") + problem.message;
+        return;
+      }
     }
+    dictionaryBusy = true;
+    updateDictionaryUsage();
+    try {
+      await chrome.storage.local.set({ subtitleSourceGlossary: pre, subtitlePostprocessDictionary: post });
+      if (clear) {
+        glossaryInput.value = "";
+        postprocessInput.value = "";
+        postprocessStatus.textContent = "저장된 사전을 삭제했습니다.";
+      } else {
+        postprocessDialog.close();
+        setStatus("전처리 " + compiledPre.count + "개 · 후처리 " + compiledPost.count + "개 사전 저장됨");
+      }
+    } catch { postprocessStatus.textContent = "사전을 저장하지 못했습니다. 다시 시도하세요."; }
+    finally { dictionaryBusy = false; updateDictionaryUsage(); }
+  }
+  document.querySelector("#subtitlePostprocessForm").addEventListener("submit", event => {
+    event.preventDefault();
+    void saveDictionaries();
   });
+  dictionaryClear.addEventListener("click", () => { void saveDictionaries(true); });
 
   for (const button of document.querySelectorAll("[data-offset-adjust]")) {
     button.addEventListener("click", async () => {
@@ -896,6 +1053,50 @@
       videoRefresh = refreshVideos();
     }
   });
+
+  const displayControls = {
+    showOriginal: document.querySelector("#subtitleShowOriginal"),
+    hideSoundEffects: document.querySelector("#subtitleHideSoundEffects"),
+    hideSpeakers: document.querySelector("#subtitleHideSpeakers")
+  };
+  const cacheStatus = document.querySelector("#subtitleTranslationCacheStatus");
+  let displayRevision = 0;
+  void chrome.storage.local.get("subtitleDisplayOptions").then(saved => {
+    if (!displayRevision) for (const [key, input] of Object.entries(displayControls)) input.checked = saved.subtitleDisplayOptions?.[key] === true;
+  }).catch(() => {});
+  const hideSyncInput = document.querySelector("#subtitleHideSyncControls");
+  let hideSyncRevision = 0;
+  void chrome.storage.local.get("subtitleHideSyncControls").then(saved => {
+    if (!hideSyncRevision) hideSyncInput.checked = saved.subtitleHideSyncControls === true;
+  }).catch(() => {});
+  hideSyncInput.addEventListener("change", () => {
+    hideSyncRevision++;
+    void chrome.storage.local.set({ subtitleHideSyncControls: hideSyncInput.checked })
+      .catch(() => setStatus("자막 싱크 메뉴 설정을 저장하지 못했습니다."));
+  });
+  for (const input of Object.values(displayControls)) input.addEventListener("change", async () => {
+    displayRevision += 1;
+    const options = Object.fromEntries(Object.entries(displayControls).map(([key, control]) => [key, control.checked]));
+    try { await chrome.storage.local.set({ subtitleDisplayOptions: options }); }
+    catch { setStatus("자막 표시 설정을 저장하지 못했습니다."); }
+  });
+  async function updateCacheStatus() {
+    try {
+      const result = await chrome.runtime.sendMessage({ type: "NYANKAT_SUBTITLE_CACHE_STATS" });
+      if (result?.ok) cacheStatus.textContent = result.entries + "개 · " + (result.bytes / 1_000_000).toFixed(2) + " / " + (result.maxBytes / 1_000_000).toFixed(0) + " MB";
+    } catch { cacheStatus.textContent = "저장된 번역 정보를 읽지 못했습니다."; }
+  }
+  document.querySelector("#clearSubtitleTranslationCache").addEventListener("click", async () => {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "NYANKAT_SUBTITLE_CACHE_CLEAR" });
+      if (!response?.ok) throw new Error();
+      cacheStatus.textContent = "저장된 번역을 삭제했습니다.";
+    } catch { cacheStatus.textContent = "저장된 번역을 삭제하지 못했습니다."; }
+  });
+  document.addEventListener("nyankat-popup-tab-shown", event => {
+    if (event.detail?.tabName === "subtitle") void updateCacheStatus();
+  });
+  void updateCacheStatus();
 
   window.NyanKatSubtitlePopup = { refreshVideos, importExtractedSubtitle };
 })();

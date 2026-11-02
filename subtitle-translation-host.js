@@ -93,6 +93,14 @@
     job.controller.abort();
   }
 
+  function releaseUnusedSession(language) {
+    if (!language || [...clients.values()].includes(language)) return;
+    const entry = sessions.get(language);
+    sessions.delete(language);
+    entry?.session.destroy();
+    entry?.row.remove();
+  }
+
   function hasForeground() {
     return jobs.size > 0;
   }
@@ -167,14 +175,13 @@
     batch.controller = controller;
     const entry = getSession(batch.sourceLanguage);
     try {
-      // Model creation can be shared with the visible cue. Do not abort that
-      // preparation when playback seeks to a new cue.
-      await entry.session.prepare();
       while (batch.texts.length && !batch.paused && !controller.signal.aborted &&
         prefetches.get(batch.clientId) === batch) {
         const text = batch.texts[0];
         batch.activeText = text;
-        const cached = typeof entry.session.cached === "function" ? entry.session.cached(text) : null;
+        const cached = await entry.session.lookup(text);
+        if (controller.signal.aborted) break;
+        if (cached === null) await entry.session.prepare();
         const translated = cached !== null ? cached : await entry.session.translateLines(text, {
           signal: controller.signal,
           onUpdate(value) {
@@ -222,9 +229,10 @@
     job.running = true;
     const entry = getSession(job.sourceLanguage);
     try {
-      await entry.session.prepare();
+      const cached = await entry.session.lookup(job.text);
       if (jobs.get(job.clientId) !== job) return;
-      const cached = typeof entry.session.cached === "function" ? entry.session.cached(job.text) : null;
+      if (cached === null) await entry.session.prepare();
+      if (jobs.get(job.clientId) !== job) return;
       const text = cached !== null ? cached : await entry.session.translateLines(job.text, {
         signal: job.controller.signal,
         onUpdate(text) {
@@ -266,12 +274,7 @@
       clients.delete(message.clientId);
       if (language) resumePrefetches();
       updateKeepAlive();
-      if (language && ![...clients.values()].includes(language)) {
-        const entry = sessions.get(language);
-        sessions.delete(language);
-        entry?.session.destroy();
-        entry?.row.remove();
-      }
+      releaseUnusedSession(language);
       updateUi();
       return;
     }
@@ -291,6 +294,7 @@
       dismissed = false;
     }
     clients.set(message.clientId, language);
+    if (previous !== language) releaseUnusedSession(previous);
     updateKeepAlive();
     const entry = getSession(language);
     if (message.type === "prefetch") {
@@ -300,7 +304,6 @@
     }
     if (message.type === "configure") {
       send({ type: "status", clientId: message.clientId, sourceLanguage: language, status: entry.session.status });
-      void entry.session.prepare().catch(() => {});
       updateUi();
       return;
     }

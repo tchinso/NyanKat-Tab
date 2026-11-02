@@ -59,6 +59,7 @@ class Element {
   setAttribute(name, value) { this.attrs[name] = String(value); }
   showModal() { this.open = true; }
   close() { this.open = false; }
+  focus() { this.focused = true; }
   getAttribute(name) { return this.attrs[name] ?? null; }
   matches(selector) {
     const match = selector.match(/^([\w-]*)?(?:\[([^=\]]+)(?:=['"]?([^'"\]]+)['"]?)?\])?$/);
@@ -112,6 +113,7 @@ async function harness(options = {}) {
   const saved = options.saved || {};
   const writes = [];
   const requests = [];
+  const runtimeRequests = [];
   const shownTabs = [];
   const timers = new Map();
   let nextTimer = 1;
@@ -122,7 +124,9 @@ async function harness(options = {}) {
     NyanKatPopup: { showTab(...args) { shownTabs.push(args); } }
   };
   const chrome = {
-    runtime: { getURL: file => "chrome-extension://test/" + file },
+    runtime: { getURL: file => "chrome-extension://test/" + file,
+      async sendMessage(message) { runtimeRequests.push(plain(message)); return { ok: true, entries: 2, bytes: 2048, maxBytes: 3_000_000 }; }
+    },
     storage: { local: {
       get: async keys => options.read && Array.isArray(keys) ? options.read() : plain(saved),
       set(data) { const copy = plain(data); writes.push(copy); Object.assign(saved, copy); return Promise.resolve(); }
@@ -152,9 +156,11 @@ async function harness(options = {}) {
   class DataTransfer {
     constructor() { this.files = []; this.items = { add: file => this.files.push(file) }; }
   }
-  const context = vm.createContext({ window, document, chrome, URL, FontFace, console, File, DataTransfer,
+  const context = vm.createContext({ window, document, chrome, URL, FontFace, console, File, DataTransfer, TextDecoder, Blob, ReadableStream, DecompressionStream,
     btoa: value => Buffer.from(value, "binary").toString("base64") });
   vm.runInContext(styleSource, context);
+  for (const name of ["subtitle-parser.js", "subtitle-context.js", "subtitle-archive.js", "subtitle-dictionary.js", "subtitle-glossary.js"]) vm.runInContext(fs.readFileSync(path.join(root, name), "utf8"), context);
+  window.NyanKatSubtitleContext = context.NyanKatSubtitleContext;
   vm.runInContext(fs.readFileSync(path.join(root, "subtitle-translation.js"), "utf8"), context);
   vm.runInContext(fs.readFileSync(path.join(root, "subtitle-postprocess.js"), "utf8"), context);
   vm.runInContext(popupSource, context);
@@ -165,7 +171,7 @@ async function harness(options = {}) {
     return found;
   };
   return {
-    window, document, saved, writes, requests, shownTabs, timers, element,
+    window, document, saved, writes, requests, runtimeRequests, shownTabs, timers, element,
     edit(id, value, event = "input") {
       const control = element(id);
       if (typeof value === "boolean") control.checked = value;
@@ -229,7 +235,7 @@ async function savePreset(h, name) {
 test("preset controls occupy the requested positions and the visibility checkbox is absent", () => {
   const heading = popupHTML.indexOf("<h3>표시 스타일</h3>");
   const presetSelect = popupHTML.indexOf('id="subtitleStylePreset"');
-  const firstStyleGroup = popupHTML.indexOf('class="subtitle-style-group"');
+  const firstStyleGroup = popupHTML.indexOf('class="subtitle-style-group"', heading);
   const saveButton = popupHTML.indexOf('id="saveSubtitleStylePreset"');
   const status = popupHTML.indexOf('id="subtitleStatus"');
   assert.ok(heading >= 0 && heading < presetSelect && presetSelect < firstStyleGroup);
@@ -428,10 +434,10 @@ test("source language choices pin the five requested languages and send changes 
   assert.equal(h.element("subtitlePostprocessSettings").hidden, true);
 });
 
-test("extracted UTF-8 subtitle becomes the selected local file with English source language", async () => {
+test("extracted UTF-8 subtitle preserves the track's explicit source language", async () => {
   const h = await harness({ video: true });
   const file = new File(["WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello"], "english.vtt");
-  assert.equal(await h.window.NyanKatSubtitlePopup.importExtractedSubtitle({ file, text: await file.text(), filename: file.name }), true);
+  assert.equal(await h.window.NyanKatSubtitlePopup.importExtractedSubtitle({ file, text: await file.text(), filename: file.name, track: { language: "en-US" } }), true);
   assert.deepEqual(h.shownTabs, [["subtitle", "overlay"]]);
   assert.equal(h.element("subtitleFile").files[0], file);
   assert.equal(h.element("subtitleEncoding").value, "utf-8");
@@ -474,6 +480,96 @@ test("postprocess dialog saves a reusable dictionary and cancel discards edits",
   h.edit("subtitlePostprocessDictionary", "임시=수정");
   h.element("cancelSubtitlePostprocess").dispatchEvent({ type: "click" });
   assert.equal(saved.subtitlePostprocessDictionary, "플라스틱 뚜껑=플라흐타\n이름=교정");
+});
+
+test("extracted Japanese/Korean tracks carry their language and ambiguous Latin text requires a choice", async () => {
+  const h = await harness({ video: true });
+  await h.refresh();
+  const text = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHola, gracias por venir hoy.";
+  for (const [track, expected] of [[{ language: "jpn", label: "Full" }, "ja"], [{ language: "ko-KR" }, "ko"], [{}, ""]]) {
+    await h.window.NyanKatSubtitlePopup.importExtractedSubtitle({ text, filename: "captions.vtt", track });
+    assert.equal(h.element("subtitleLanguage").value, expected);
+  }
+  h.element("loadSubtitle").dispatchEvent({ type: "click" });
+  await settle();
+  assert.ok(!h.requests.some(item => item.message.type === "NYANKAT_SUBTITLE_LOAD"));
+  assert.match(h.element("subtitleStatus").textContent, /원문 언어/);
+  h.edit("subtitleLanguage", "es", "change");
+  h.element("loadSubtitle").dispatchEvent({ type: "click" });
+  await settle();
+  assert.equal(h.requests.find(item => item.message.type === "NYANKAT_SUBTITLE_LOAD").message.payload.sourceLanguage, "es");
+});
+
+test("a new local file infers its language after an extracted import and keeps it through video refresh", async () => {
+  const h = await harness({ video: true, sourceLanguage: "en" });
+  await h.window.NyanKatSubtitlePopup.importExtractedSubtitle({ text: "WEBVTT\n\n00:01.000 --> 00:03.000\nHello", filename: "a.vtt", track: { language: "ja" } });
+  h.element("subtitleFile").files = [new File(["1\n00:00:01,000 --> 00:00:03,000\n오늘은 아주 좋은 날씨입니다. 함께 놀러 가요."], "next.srt")];
+  h.element("subtitleFile").dispatchEvent({ type: "change" });
+  await settle();
+  assert.equal(h.element("subtitleLanguage").value, "ko");
+  await h.refresh();
+  assert.equal(h.element("subtitleLanguage").value, "ko");
+});
+
+test("ZIP stays unapplied until an entry is chosen, then selected bytes and filename reach the video", async () => {
+  const h = await harness({ video: true });
+  await h.refresh();
+  const text = "1\n00:00:01,000 --> 00:00:03,000\n오늘은 아주 좋은 날씨입니다. 함께 놀러 가요.";
+  h.window.NyanKatSubtitleArchive = { MAX_FILE_BYTES: 8 * 1024 * 1024, MAX_ARCHIVE_BYTES: 32 * 1024 * 1024,
+    open() { return { entries: [{ id: 7, name: "시즌/02.srt", size: 120 }], async extract(id) { assert.equal(id, 7); return Buffer.from(text); } }; }
+  };
+  h.element("subtitleFile").files = [new File(["zip"], "season.zip")];
+  h.element("subtitleFile").dispatchEvent({ type: "change" });
+  await settle();
+  assert.equal(h.element("subtitleArchiveFields").hidden, false);
+  h.element("loadSubtitle").dispatchEvent({ type: "click" });
+  await settle();
+  assert.ok(!h.requests.some(item => item.message.type === "NYANKAT_SUBTITLE_LOAD"));
+  h.edit("subtitleArchiveEntry", "7", "change");
+  await settle();
+  h.element("loadSubtitle").dispatchEvent({ type: "click" });
+  await settle();
+  const payload = h.requests.find(item => item.message.type === "NYANKAT_SUBTITLE_LOAD").message.payload;
+  assert.equal(payload.filename, "02.srt");
+  assert.equal(Buffer.from(payload.b64, "base64").toString(), text);
+});
+
+test("MicroDVD file requests FPS before apply and embedded FPS is authoritative", async () => {
+  const h = await harness({ video: true });
+  await h.refresh();
+  h.element("subtitleFile").files = [new File(["{24}{48}오늘은 아주 좋은 날씨입니다. 함께 놀러 가요."], "old.sub")];
+  h.element("subtitleFile").dispatchEvent({ type: "change" });
+  await settle();
+  assert.equal(h.element("subtitleFpsFields").hidden, false);
+  h.element("loadSubtitle").dispatchEvent({ type: "click" });
+  await settle();
+  assert.ok(!h.requests.some(item => item.message.type === "NYANKAT_SUBTITLE_LOAD"));
+  assert.match(h.element("subtitleStatus").textContent, /FPS/);
+  h.edit("subtitleFps", "24");
+  h.element("loadSubtitle").dispatchEvent({ type: "click" });
+  await settle();
+  assert.equal(h.requests.find(item => item.message.type === "NYANKAT_SUBTITLE_LOAD").message.payload.fps, 24);
+  h.element("subtitleFile").files = [new File(["{1}{1}25\n{25}{50}대사입니다."], "header.sub")];
+  h.element("subtitleFile").dispatchEvent({ type: "change" });
+  await settle();
+  assert.equal(h.element("subtitleFps").value, "25");
+  assert.equal(h.element("subtitleFps").disabled, true);
+});
+
+test("display options, source glossary and persistent cache controls are connected", async () => {
+  const h = await harness({ saved: { subtitleDisplayOptions: { showOriginal: true }, subtitleSourceGlossary: "桜=사쿠라" } });
+  assert.equal(h.element("subtitleShowOriginal").checked, true);
+  h.edit("subtitleHideSoundEffects", true, "change");
+  h.element("subtitlePreprocessSettings").dispatchEvent({ type: "click" });
+  await settle();
+  h.edit("subtitleSourceGlossary", "桜=사쿠라\n葵=아오이");
+  h.element("subtitlePostprocessForm").dispatchEvent({ type: "submit", preventDefault() {} });
+  h.element("clearSubtitleTranslationCache").dispatchEvent({ type: "click" });
+  await settle();
+  assert.deepEqual(h.saved.subtitleDisplayOptions, { showOriginal: true, hideSoundEffects: true, hideSpeakers: false });
+  assert.equal(h.saved.subtitleSourceGlossary, "桜=사쿠라\n葵=아오이");
+  assert.ok(h.runtimeRequests.some(item => item.type === "NYANKAT_SUBTITLE_CACHE_CLEAR"));
+  assert.match(h.element("subtitleTranslationCacheStatus").textContent, /삭제했습니다/);
 });
 
 test("sync buttons include pending manual edits and accumulate before delayed replies", async () => {
@@ -889,4 +985,53 @@ test("a same-video refresh started during a rate update cannot overwrite the com
   await settle();
   assert.equal(h.element("subtitleSyncRate").value, "1.001010", "the held refresh keeps its original timing restoration permissions");
   h.close();
+});
+
+
+test("translation controls follow source language and sync menu preference survives reopening", async () => {
+  const saved = { subtitleHideSyncControls: true };
+  const h = await harness({ saved });
+  assert.equal(h.element("subtitleTranslationSettings").hidden, true);
+  assert.equal(h.element("subtitleHideSyncControls").checked, true);
+  h.edit("subtitleLanguage", "ja", "change");
+  await settle();
+  assert.equal(h.element("subtitleTranslationSettings").hidden, false);
+  h.edit("subtitleLanguage", "ko", "change");
+  await settle();
+  assert.equal(h.element("subtitleTranslationSettings").hidden, true);
+  h.edit("subtitleHideSyncControls", false, "change");
+  await settle();
+  const reopened = await harness({ saved });
+  assert.equal(reopened.element("subtitleHideSyncControls").checked, false);
+});
+
+test("dictionary manager shares a UTF-8 budget, saves atomically and deletes both dictionaries", async () => {
+  const saved = { subtitleSourceGlossary: "Rem=렘", subtitlePostprocessDictionary: "렘=램" };
+  const h = await harness({ saved });
+  h.element("subtitlePreprocessSettings").dispatchEvent({ type: "click" });
+  await settle();
+  assert.equal(h.element("subtitleSourceGlossary").value, "Rem=렘");
+  assert.match(h.element("subtitleDictionaryUsage").textContent, /\/ 10 KiB/);
+  assert.equal(h.element("subtitlePostprocessDictionary").value, "렘=램");
+  h.edit("subtitleSourceGlossary", "a=" + "가".repeat(1800));
+  h.edit("subtitlePostprocessDictionary", "b=" + "나".repeat(1800));
+  assert.equal(h.element("saveSubtitlePostprocess").disabled, true);
+  h.element("subtitlePostprocessForm").dispatchEvent({ type: "submit", preventDefault() {} });
+  await settle();
+  assert.equal(saved.subtitleSourceGlossary, "Rem=렘");
+  assert.match(h.element("subtitlePostprocessStatus").textContent, /10 KiB/);
+  h.edit("subtitleSourceGlossary", "a=" + "가".repeat(1200));
+  h.edit("subtitlePostprocessDictionary", "b=" + "나".repeat(1200));
+  h.element("subtitlePostprocessForm").dispatchEvent({ type: "submit", preventDefault() {} });
+  await settle();
+  assert.equal(saved.subtitleSourceGlossary.length, 1202);
+  assert.equal(saved.subtitlePostprocessDictionary.length, 1202);
+  assert.ok(h.writes.some(write => write.subtitleSourceGlossary && write.subtitlePostprocessDictionary));
+  h.element("subtitlePostprocessSettings").dispatchEvent({ type: "click" });
+  await settle();
+  h.element("clearSubtitleDictionaries").dispatchEvent({ type: "click" });
+  await settle();
+  assert.equal(saved.subtitleSourceGlossary, "");
+  assert.equal(saved.subtitlePostprocessDictionary, "");
+  assert.match(h.element("subtitlePostprocessStatus").textContent, /삭제/);
 });

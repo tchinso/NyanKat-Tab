@@ -1,13 +1,14 @@
 "use strict";
 
 (() => {
-  if (window.__nyankatSubtitleOverlayInstalled || !window.NyanKatSubtitleParser || !window.NyanKatSubtitleStyle) {
+  if (window.__nyankatSubtitleOverlayInstalled || !window.NyanKatSubtitleParser || !window.NyanKatSubtitleStyle || !window.NyanKatSubtitleDisplay) {
     return;
   }
   window.__nyankatSubtitleOverlayInstalled = true;
 
   const parser = window.NyanKatSubtitleParser;
   const subtitleStyle = window.NyanKatSubtitleStyle;
+  const display = window.NyanKatSubtitleDisplay;
   const { DEFAULT_STYLE, normalizeStyle } = subtitleStyle;
   const MAX_OFFSET_MS = 60 * 60 * 1000;
   const MIN_SYNC_RATE = 0.1;
@@ -23,9 +24,15 @@
   let savedStyle = { ...DEFAULT_STYLE };
   let savedStyleRevision = 0;
   let translationHost = null;
+  let translationHostVisible = false;
+  let fullscreenNotice = null;
   let nextTranslationRequest = 1;
   let postprocessRevision = 0;
   let postprocess = window.NyanKatSubtitlePostprocess?.compile("");
+  let displayOptions = display.normalizeOptions();
+  let displayRevision = 0;
+  let hideSyncControls = false;
+  let hideSyncRevision = 0;
 
   function clampNumber(value, min, max, fallback) {
     const numberValue = Number(value);
@@ -155,6 +162,12 @@
       overlay: null,
       textBox: null,
       textLayers: null,
+      originalText: null,
+      syncControls: null,
+      syncHiddenForEpisode: false,
+      syncNotice: null,
+      syncNoticeTimer: 0,
+      calibration: [],
       resizeObserver: null,
       mediaHandlers: null,
       frameUpdateId: 0,
@@ -177,6 +190,7 @@
 
     stopSpeech(record);
     stopCueUpdates(record);
+    window.clearTimeout(record.syncNoticeTimer);
     disconnectTranslation(record);
     unbindOverlayEvents(record);
     if (record.overlay) {
@@ -184,6 +198,10 @@
       record.overlay = null;
       record.textBox = null;
       record.textLayers = null;
+      record.originalText = null;
+      record.syncControls = null;
+      record.syncNotice = null;
+      record.calibrationUi = null;
     }
     recordsByVideo.delete(record.video);
     recordsById.delete(record.id);
@@ -350,8 +368,8 @@
     const textLayers = {};
     overlay.className = "nyankat-subtitle-overlay";
     overlay.setAttribute("data-nyankat-subtitle-overlay", "true");
-    overlay.setAttribute("aria-hidden", "true");
     textBox.className = "nyankat-subtitle-text";
+    textBox.setAttribute("aria-hidden", "true");
     textBox.hidden = true;
     glyphs.className = "nyankat-subtitle-glyphs";
     for (const name of ["shadow", "outer-outline", "outline", "fill"]) {
@@ -361,11 +379,17 @@
       textLayers[name] = layer;
     }
     textBox.append(glyphs);
+    const originalText = document.createElement("div");
+    originalText.className = "nyankat-subtitle-original";
+    originalText.hidden = true;
+    textBox.append(originalText);
     overlay.append(textBox);
     document.documentElement.append(overlay);
     record.overlay = overlay;
     record.textBox = textBox;
     record.textLayers = textLayers;
+    record.originalText = originalText;
+    createSyncControls(record);
     bindOverlayEvents(record);
     applyStyle(record);
     scheduleOverlayLayout();
@@ -394,12 +418,17 @@
       timeupdate: render,
       seeked: render,
       ratechange: render,
-      loadedmetadata: layout,
+      loadedmetadata: () => {
+        record.syncHiddenForEpisode = false;
+        closeSyncPanel(record);
+        layout();
+      },
       loadeddata: layout,
       resize: layout,
       play,
       pause,
-      ended: pause
+      ended: pause,
+      pointerdown: () => closeSyncPanel(record)
     };
     for (const [eventName, handler] of Object.entries(record.mediaHandlers)) {
       record.video.addEventListener(eventName, handler);
@@ -410,6 +439,198 @@
       record.resizeObserver.observe(record.video);
       record.resizeObserver.observe(record.textBox);
     }
+  }
+
+  function syncDescription(record) {
+    const offset = record.offsetMs / 1000;
+    return "누적 " + Number(Math.abs(offset).toFixed(3)) + "초 " + (offset < 0 ? "빠르게" : "늦게") +
+      " · 배율 " + Number(record.syncRate.toFixed(6));
+  }
+
+  function showSyncNotice(record, text) {
+    if (!record.syncNotice) return;
+    window.clearTimeout(record.syncNoticeTimer);
+    record.syncNotice.textContent = text;
+    record.syncNotice.hidden = false;
+    record.syncNoticeTimer = window.setTimeout(() => { record.syncNotice.hidden = true; }, 2500);
+  }
+
+  function syncTime(value) {
+    const seconds = Math.max(0, Number(value) || 0);
+    return Math.floor(seconds / 60) + ":" + (seconds % 60).toFixed(2).padStart(5, "0");
+  }
+
+  function selectedCalibrationCue(record) {
+    const input = record.calibrationUi?.cue;
+    if (!input || !record.cues.length) return null;
+    const index = Math.round(clampNumber(input.value, 1, record.cues.length, 1)) - 1;
+    input.value = String(index + 1);
+    return record.cues[index];
+  }
+
+  function refreshCalibration(record) {
+    const ui = record.calibrationUi;
+    if (!ui) return;
+    ui.summary.textContent = syncDescription(record);
+    ui.cue.max = String(record.cues.length);
+    const cue = selectedCalibrationCue(record);
+    ui.preview.textContent = cue ? syncTime(cue.start) + " · " + cue.text : "";
+    ui.points.textContent = record.calibration.map((point, index) =>
+      (index + 1) + "번: 자막 " + syncTime(point.subtitleTime) + " → 영상 " + syncTime(point.videoTime)).join("\n");
+    ui.second.disabled = record.calibration.length === 0;
+    ui.apply.disabled = true;
+    if (record.calibration.length === 2) {
+      try {
+        const solution = display.calibrate(...record.calibration);
+        ui.points.textContent += "\n적용할 값: " + syncDescription(solution);
+        ui.apply.disabled = false;
+      } catch (error) {
+        ui.points.textContent += "\n" + error.message;
+      }
+    }
+  }
+
+  function resetCalibration(record) {
+    record.calibration = [];
+    if (record.calibrationUi) record.calibrationUi.cue.value = "1";
+    refreshCalibration(record);
+  }
+
+  function closeSyncPanel(record) {
+    const ui = record.calibrationUi;
+    if (!ui) return;
+    ui.panel.hidden = true;
+    ui.toggle.setAttribute("aria-expanded", "false");
+    updateFullscreenNotice();
+  }
+
+  function createSyncControls(record) {
+    const controls = document.createElement("div");
+    controls.className = "nyankat-subtitle-sync";
+    const panel = document.createElement("div");
+    panel.className = "nyankat-subtitle-sync-panel";
+    panel.hidden = true;
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-label", "자막 싱크 조절");
+    const button = (parent, name, text, action) => {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.className = "nyankat-subtitle-sync-" + name;
+      element.textContent = text;
+      element.addEventListener("click", event => {
+        event?.stopPropagation();
+        action();
+      });
+      parent.append(element);
+      return element;
+    };
+    const toggle = button(controls, "toggle", "자막 싱크", () => {
+      panel.hidden = !panel.hidden;
+      toggle.setAttribute("aria-expanded", String(!panel.hidden));
+      if (!panel.hidden) {
+        record.calibrationUi.cue.value = String(Math.max(0, record.currentCueIndex) + 1);
+        refreshCalibration(record);
+      }
+    });
+    toggle.setAttribute("aria-expanded", "false");
+    const summary = document.createElement("div");
+    summary.className = "nyankat-subtitle-sync-summary";
+    panel.append(summary);
+    const steps = document.createElement("div");
+    steps.className = "nyankat-subtitle-sync-row";
+    for (const delta of [-200, 200]) {
+      button(steps, delta < 0 ? "earlier" : "later", delta < 0 ? "0.2초 빠르게" : "0.2초 늦게", () => {
+        updateOffset(record, record.offsetMs + delta);
+        showSyncNotice(record, "자막 " + (delta < 0 ? "0.2초 빠르게" : "0.2초 늦게") + " · " + syncDescription(record));
+      });
+    }
+    panel.append(steps);
+    const details = document.createElement("details");
+    const heading = document.createElement("summary");
+    heading.textContent = "두 지점으로 밀림 보정";
+    details.append(heading);
+    const help = document.createElement("p");
+    help.textContent = "맞출 대사를 고른 뒤 그 대사가 들리는 순간 지점을 찍으세요. 앞부분과 뒷부분을 사용하세요. 중간 광고·편집 컷은 보정하지 못합니다.";
+    details.append(help);
+    const chooser = document.createElement("div");
+    chooser.className = "nyankat-subtitle-sync-row";
+    const cue = document.createElement("input");
+    cue.type = "number";
+    cue.min = "1";
+    cue.step = "1";
+    cue.value = "1";
+    cue.className = "nyankat-subtitle-sync-cue";
+    cue.setAttribute("aria-label", "맞출 자막 대사 번호");
+    button(chooser, "previous", "이전 대사", () => { cue.value = String(Number(cue.value) - 1); refreshCalibration(record); });
+    chooser.append(cue);
+    button(chooser, "next", "다음 대사", () => { cue.value = String(Number(cue.value) + 1); refreshCalibration(record); });
+    cue.addEventListener("change", () => refreshCalibration(record));
+    details.append(chooser);
+    const preview = document.createElement("div");
+    preview.className = "nyankat-subtitle-sync-preview";
+    details.append(preview);
+    const capture = slot => {
+      const selected = selectedCalibrationCue(record);
+      if (!selected) return;
+      const point = { subtitleTime: selected.start, videoTime: Number(record.video.currentTime) };
+      record.calibration = slot === 0 ? [point] : [record.calibration[0], point];
+      refreshCalibration(record);
+    };
+    const captures = document.createElement("div");
+    captures.className = "nyankat-subtitle-sync-row";
+    button(captures, "first", "첫 지점 찍기", () => capture(0));
+    const second = button(captures, "second", "둘째 지점 찍기", () => capture(1));
+    details.append(captures);
+    const points = document.createElement("div");
+    points.className = "nyankat-subtitle-sync-points";
+    points.setAttribute("role", "status");
+    details.append(points);
+    const apply = button(details, "apply", "두 지점 보정 적용", () => {
+      if (record.calibration.length !== 2) return;
+      try {
+        const solution = display.calibrate(...record.calibration);
+        record.syncRate = solution.syncRate;
+        updateOffset(record, solution.offsetMs);
+        showSyncNotice(record, "두 지점 보정 적용 · " + syncDescription(record));
+      } catch (error) {
+        showSyncNotice(record, error.message);
+      }
+    });
+    button(details, "clear-points", "지점 다시 찍기", () => resetCalibration(record));
+    panel.append(details);
+    button(panel, "reset", "싱크 초기화", () => {
+      record.syncRate = 1;
+      updateOffset(record, 0);
+      resetCalibration(record);
+      showSyncNotice(record, "자막 싱크 초기화 · " + syncDescription(record));
+    });
+    button(panel, "hide-episode", "이번 화 싱크 버튼 숨기기", () => {
+      record.syncHiddenForEpisode = true;
+      closeSyncPanel(record);
+      positionOverlay(record);
+    });
+    for (const name of ["pointerdown", "click", "keyup"]) {
+      controls.addEventListener(name, event => event?.stopPropagation());
+    }
+    controls.addEventListener("keydown", event => {
+      event?.stopPropagation();
+      if (event?.key === "Escape") {
+        event.preventDefault();
+        closeSyncPanel(record);
+        toggle.focus();
+      }
+    });
+    controls.append(panel);
+    record.overlay.append(controls);
+    const notice = document.createElement("div");
+    notice.className = "nyankat-subtitle-sync-notice";
+    notice.hidden = true;
+    notice.setAttribute("role", "status");
+    record.overlay.append(notice);
+    record.syncControls = controls;
+    record.syncNotice = notice;
+    record.calibrationUi = { panel, toggle, summary, cue, preview, points, second, apply };
+    refreshCalibration(record);
   }
 
   function positionSubtitleText(record) {
@@ -499,17 +720,23 @@
       record.overlay.hidden = true;
       return;
     }
+    record.overlay.style.setProperty("--nyankat-subtitle-video-height", Math.round(videoRect.height) + "px");
 
     const fullscreenElement = document.fullscreenElement;
     const isVideoFullscreen =
       fullscreenElement &&
       (fullscreenElement === record.video || fullscreenElement.contains(record.video));
-    const host = isVideoFullscreen ? fullscreenElement : document.documentElement;
+    const videoIsFullscreen = fullscreenElement === record.video && typeof record.overlay.showPopover === "function";
+    if (!videoIsFullscreen && record.overlay.getAttribute("popover")) {
+      if (record.overlay.matches(":popover-open")) record.overlay.hidePopover();
+      record.overlay.removeAttribute("popover");
+    }
+    const host = isVideoFullscreen && !videoIsFullscreen ? fullscreenElement : document.documentElement;
     if (record.overlay.parentElement !== host) {
       host.append(record.overlay);
     }
 
-    if (isVideoFullscreen) {
+    if (isVideoFullscreen && !videoIsFullscreen) {
       const hostRect = host.getBoundingClientRect();
       Object.assign(record.overlay.style, {
         position: "absolute",
@@ -528,6 +755,11 @@
       });
     }
     record.overlay.hidden = !record.settings.visible;
+    record.syncControls.hidden = hideSyncControls || record.syncHiddenForEpisode || videoIsFullscreen || !record.cues.length;
+    if (videoIsFullscreen) {
+      record.overlay.setAttribute("popover", "manual");
+      if (!record.overlay.matches(":popover-open")) record.overlay.showPopover();
+    }
     positionSubtitleText(record);
   }
 
@@ -543,6 +775,7 @@
           positionOverlay(record);
         }
       }
+      updateFullscreenNotice();
     });
   }
 
@@ -620,10 +853,18 @@
 
   function setCueText(record, text) {
     if (!record.textLayers || !record.textBox) return;
+    const translated = record.sourceLanguage !== "ko" && record.rawTranslatedText !== null;
+    const original = record.speechText || record.cues[record.currentCueIndex]?.text || "";
+    const options = record.sourceLanguage === "ko" ? {} : displayOptions;
+    const filteredOriginal = display.filterText(original, options);
+    const visibleText = original.trim() && !filteredOriginal.trim() ? "" : display.filterText(text, options);
+    const sourceText = translated && displayOptions.showOriginal ? filteredOriginal : "";
     for (const layer of Object.values(record.textLayers)) {
-      layer.textContent = text;
+      layer.textContent = visibleText;
     }
-    record.textBox.hidden = !text.trim();
+    record.originalText.textContent = sourceText;
+    record.originalText.hidden = !sourceText.trim() || sourceText === visibleText;
+    record.textBox.hidden = !visibleText.trim() && record.originalText.hidden;
     positionSubtitleText(record);
   }
 
@@ -717,6 +958,7 @@
     if (window.top !== window) return false;
     if (translationHost?.isConnected && !restart) return true;
     translationHost?.remove();
+    translationHostVisible = false;
     if (!document.documentElement) return false;
     translationHost = document.createElement("iframe");
     translationHost.className = "nyankat-subtitle-translation-host";
@@ -726,6 +968,51 @@
     translationHost.hidden = true;
     document.documentElement.append(translationHost);
     return true;
+  }
+
+  function showTranslationHost(visible, raise = false) {
+    if (!translationHost?.isConnected) return;
+    translationHostVisible = visible;
+    const fullscreen = document.fullscreenElement;
+    const constrained = fullscreen && (["VIDEO", "IFRAME"].includes(fullscreen.tagName) || typeof fullscreen.moveBefore !== "function");
+    const host = !constrained && fullscreen ? fullscreen : document.documentElement;
+    if (translationHost.parentElement !== host && typeof host.moveBefore === "function") {
+      host.moveBefore(translationHost, null);
+    }
+    visible = visible && !constrained;
+    translationHost.hidden = !visible;
+    if (typeof translationHost.showPopover !== "function") return;
+    if (translationHost.matches(":popover-open") && (!visible || raise)) translationHost.hidePopover();
+    if (visible) {
+      translationHost.setAttribute("popover", "manual");
+      if (!translationHost.matches(":popover-open")) translationHost.showPopover();
+    } else {
+      translationHost.removeAttribute("popover");
+    }
+    updateFullscreenNotice();
+  }
+
+  function updateFullscreenNotice() {
+    const fullscreen = document.fullscreenElement;
+    const nativeFullscreen = fullscreen && ["VIDEO", "IFRAME"].includes(fullscreen.tagName);
+    const panelOpen = [...recordsById.values()].some(record =>
+      record.video === fullscreen && record.calibrationUi && !record.calibrationUi.panel.hidden);
+    const needed = nativeFullscreen && (translationHostVisible || panelOpen);
+    if (!needed) {
+      fullscreenNotice?.remove();
+      fullscreenNotice = null;
+      return;
+    }
+    if (fullscreenNotice?.isConnected) return;
+    fullscreenNotice = document.createElement("div");
+    fullscreenNotice.className = "nyankat-subtitle-fullscreen-note";
+    fullscreenNotice.textContent = "싱크 조절·번역 준비는 전체화면 종료 후 사용할 수 있습니다.";
+    fullscreenNotice.setAttribute("role", "status");
+    document.documentElement.append(fullscreenNotice);
+    if (typeof fullscreenNotice.showPopover === "function") {
+      fullscreenNotice.setAttribute("popover", "manual");
+      fullscreenNotice.showPopover();
+    }
   }
 
   function stopCueUpdates(record) {
@@ -795,6 +1082,7 @@
     record.offsetMs = clampNumber(offsetMs, -MAX_OFFSET_MS, MAX_OFFSET_MS, record.offsetMs);
     record.currentCueIndex = -2;
     renderCue(record);
+    refreshCalibration(record);
     return record.offsetMs;
   }
 
@@ -802,6 +1090,7 @@
     record.syncRate = normalizeSyncRate(syncRate, record.syncRate);
     record.currentCueIndex = -2;
     renderCue(record);
+    refreshCalibration(record);
     return record.syncRate;
   }
 
@@ -812,67 +1101,14 @@
       cueCount: record.cues.length,
       offsetMs: record.offsetMs,
       syncRate: record.syncRate,
+      displayOptions: { ...displayOptions },
+      currentTime: Number(record.video.currentTime) || 0,
+      currentCueIndex: record.currentCueIndex,
+      currentCueStart: record.cues[record.currentCueIndex]?.start ?? null,
       sourceLanguage: record.sourceLanguage,
       translationStatus: record.translationStatus,
       settings: { ...record.settings }
     };
-  }
-
-  function decodeArrayBuffer(buffer, preferredEncoding) {
-    const bytes = new Uint8Array(buffer);
-    if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-      return new TextDecoder("utf-8").decode(bytes.subarray(3));
-    }
-    if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
-      return new TextDecoder("utf-16le").decode(bytes.subarray(2));
-    }
-    if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-      return new TextDecoder("utf-16be").decode(bytes.subarray(2));
-    }
-
-    if (preferredEncoding && preferredEncoding !== "auto") {
-      try {
-        return new TextDecoder(preferredEncoding).decode(bytes);
-      } catch {
-        // Continue with automatic detection.
-      }
-    }
-
-    // ASCII timing syntax in BOM-less UTF-16 is also valid UTF-8 with NULs.
-    // Check its byte order before UTF-8, using the prefix rather than allowing
-    // a long non-ASCII cue to drown out the subtitle's timing/header syntax.
-    const sampleLength = Math.min(bytes.length, 4096);
-    let evenZeros = 0;
-    let oddZeros = 0;
-    for (let index = 0; index + 1 < sampleLength; index += 2) {
-      if (bytes[index] === 0) evenZeros += 1;
-      if (bytes[index + 1] === 0) oddZeros += 1;
-    }
-    const utf16Encoding = oddZeros > sampleLength / 8 && oddZeros > evenZeros * 2 ? "utf-16le"
-      : evenZeros > sampleLength / 8 && evenZeros > oddZeros * 2 ? "utf-16be" : null;
-    if (utf16Encoding) {
-      try {
-        return new TextDecoder(utf16Encoding, { fatal: true }).decode(bytes);
-      } catch {
-        // Invalid UTF-16 should still get the normal encoding fallbacks.
-      }
-    }
-
-    try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      // UTF-8 did not validate; try Korean and Western encodings below.
-    }
-
-    for (const encoding of ["euc-kr", "windows-1252"]) {
-      try {
-        return new TextDecoder(encoding).decode(bytes);
-      } catch {
-        // Try the next encoding.
-      }
-    }
-
-    return Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
   }
 
   function decodeSubtitle(encoded, encoding) {
@@ -881,7 +1117,7 @@
     for (let index = 0; index < binary.length; index += 1) {
       bytes[index] = binary.charCodeAt(index);
     }
-    return decodeArrayBuffer(bytes.buffer, encoding);
+    return parser.decode(bytes.buffer, encoding);
   }
 
   function loadSubtitle(record, payload) {
@@ -892,7 +1128,12 @@
       return { ok: false, reason: "invalid_file" };
     }
 
-    const cues = parser.parse(parser.guessFormatByFilename(payload.filename), subtitleText);
+    let cues;
+    try {
+      cues = parser.parse(parser.guessFormatByFilename(payload.filename), subtitleText, { fps: payload.fps });
+    } catch (error) {
+      return { ok: false, reason: error.code || "invalid_file" };
+    }
     if (!cues.length) {
       return { ok: false, reason: "no_cues" };
     }
@@ -902,6 +1143,10 @@
     }
 
     record.cues = cues;
+    resetCalibration(record);
+    record.syncHiddenForEpisode = false;
+    closeSyncPanel(record);
+    positionOverlay(record);
     let latestEnd = -Infinity;
     record.cueEndPrefixes = cues.map((cue) => {
       latestEnd = Math.max(latestEnd, cue.end);
@@ -921,16 +1166,22 @@
   function unloadSubtitle(record) {
     stopSpeech(record);
     stopCueUpdates(record);
+    window.clearTimeout(record.syncNoticeTimer);
     disconnectTranslation(record);
     unbindOverlayEvents(record);
     record.cues = [];
     record.cueEndPrefixes = [];
     record.currentCueIndex = -1;
+    record.calibration = [];
     if (record.overlay) {
       record.overlay.remove();
       record.overlay = null;
       record.textBox = null;
       record.textLayers = null;
+      record.originalText = null;
+      record.syncControls = null;
+      record.syncNotice = null;
+      record.calibrationUi = null;
     }
     return { ok: true, state: getState(record) };
   }
@@ -955,6 +1206,7 @@
       record.speechText = '';
       record.rawTranslatedText = null;
       record.sourceLanguage = 'ja';
+      record.syncControls.hidden = true;
       applyStyle(record);
       connectTranslation(record);
       record.speechHandler = () => {
@@ -993,13 +1245,15 @@
       return;
     }
     if (message.type === "NYANKAT_SUBTITLE_TRANSLATION_HOST_VISIBILITY") {
-      if (window.top === window && translationHost) translationHost.hidden = message.visible !== true;
+      if (window.top === window) showTranslationHost(message.visible === true);
       sendResponse({ ok: Boolean(translationHost) });
       return;
     }
     if (message.type === "NYANKAT_SUBTITLE_TRANSLATION_HOST_REMOVE") {
       translationHost?.remove();
       translationHost = null;
+      translationHostVisible = false;
+      updateFullscreenNotice();
       sendResponse({ ok: true });
       return;
     }
@@ -1044,6 +1298,13 @@
       return;
     }
 
+    if (message.type === "NYANKAT_SUBTITLE_SET_DISPLAY") {
+      displayRevision += 1;
+      applyDisplayOptions(payload.options);
+      sendResponse({ ok: true, state: getState(record) });
+      return;
+    }
+
     if (message.type === "NYANKAT_SUBTITLE_UPDATE_STYLE") {
       updateStyle(record, payload.settings);
       sendResponse({ ok: true, state: getState(record) });
@@ -1084,7 +1345,23 @@
     scheduleOverlayLayout();
   }
 
+  function applyHideSyncControls(value) {
+    hideSyncControls = value === true;
+    for (const record of recordsById.values()) {
+      if (hideSyncControls) closeSyncPanel(record);
+      positionOverlay(record);
+    }
+  }
+
   if (chrome.storage && chrome.storage.local) {
+    const syncRevision = hideSyncRevision;
+    void chrome.storage.local.get("subtitleHideSyncControls").then(result => {
+      if (syncRevision === hideSyncRevision) applyHideSyncControls(result.subtitleHideSyncControls);
+    }).catch(() => {});
+    const optionsRevision = displayRevision;
+    void chrome.storage.local.get("subtitleDisplayOptions").then(result => {
+      if (optionsRevision === displayRevision) applyDisplayOptions(result.subtitleDisplayOptions);
+    }).catch(() => {});
     const dictionaryRevision = postprocessRevision;
     void chrome.storage.local.get("subtitlePostprocessDictionary").then(result => {
       if (dictionaryRevision === postprocessRevision) applyPostprocessDictionary(result.subtitlePostprocessDictionary);
@@ -1099,6 +1376,27 @@
     }).catch(() => {});
     if (chrome.storage.onChanged) {
       chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === "local" && changes.subtitleHideSyncControls) {
+          hideSyncRevision++;
+          applyHideSyncControls(changes.subtitleHideSyncControls.newValue);
+        }
+        if (areaName === "local" && changes.subtitleDisplayOptions) {
+          displayRevision += 1;
+          applyDisplayOptions(changes.subtitleDisplayOptions.newValue);
+        }
+        if (areaName === "local" && changes.subtitleSourceGlossary) {
+          for (const record of recordsById.values()) {
+            disconnectTranslation(record);
+            record.rawTranslatedText = null;
+            if (record.speechSession) {
+              setCueText(record, record.speechText);
+              if (record.speechText) requestTranslation(record, record.speechText);
+            } else {
+              record.currentCueIndex = -2;
+              renderCue(record);
+            }
+          }
+        }
         if (areaName === "local" && changes.subtitlePostprocessDictionary) {
           postprocessRevision += 1;
           applyPostprocessDictionary(changes.subtitlePostprocessDictionary.newValue);
@@ -1121,9 +1419,20 @@
     }
   }
 
+  function applyDisplayOptions(options) {
+    displayOptions = display.normalizeOptions(options);
+    for (const record of recordsById.values()) {
+      if (record.rawTranslatedText !== null) setTranslatedCueText(record, record.rawTranslatedText);
+      else setCueText(record, record.speechText || record.cues[record.currentCueIndex]?.text || "");
+    }
+  }
+
   window.addEventListener("resize", scheduleOverlayLayout, { passive: true });
   window.addEventListener("scroll", scheduleOverlayLayout, { capture: true, passive: true });
-  document.addEventListener("fullscreenchange", scheduleOverlayLayout);
+  document.addEventListener("fullscreenchange", () => {
+    scheduleOverlayLayout();
+    if (translationHost) showTranslationHost(translationHostVisible, true);
+  });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
       scheduleOverlayLayout();

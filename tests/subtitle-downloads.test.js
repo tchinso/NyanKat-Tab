@@ -87,6 +87,19 @@ test("click saves validated UTF-8 subtitle in the worker with sanitized filename
   assert.equal(h.frameRequests[0].message.allowFetch, true);
 });
 
+test("track flags and producer survive background rediscovery and preparation retains language", async t => {
+  const h = await harness(); t.after(() => h.close());
+  const track = await h.detect({ language: "ja", forced: true, default: false, producer: "Team A", role: "forced-subtitle" });
+  await h.message({ type: "NYANKAT_DOWNLOAD_DETECTED", tracks: [{ url: track.url, source: "network" }] }, PAGE);
+  const listed = (await h.message({ type: "NYANKAT_DOWNLOAD_LIST", tabId: 7 })).tracks[0];
+  assert.equal(listed.forced, true);
+  assert.equal(listed.default, false);
+  assert.equal(listed.producer, "Team A");
+  assert.equal(listed.role, "forced-subtitle");
+  const prepared = await h.message({ type: "NYANKAT_DOWNLOAD_PREPARE", tabId: 7, id: listed.id });
+  assert.equal(prepared.language, "ja");
+});
+
 test("a later raw network response preserves named track metadata and the download filename", async t => {
   const h = await harness({ frameRead: () => ({ ok: true, text: VTT, contentType: "text/vtt" }) });
   t.after(() => h.close());

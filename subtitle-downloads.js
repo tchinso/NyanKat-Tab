@@ -95,6 +95,14 @@
         partial: raw.partial === true || (/^nyankat-cues:/.test(raw.url) && raw.complete !== true),
         verified: raw.verified === true || (existing && existing.verified) || false
       };
+      for (const field of ["forced", "default"]) {
+        if (typeof raw[field] === "boolean") track[field] = raw[field];
+        else if (typeof existing?.[field] === "boolean") track[field] = existing[field];
+      }
+      for (const field of ["role", "producer"]) {
+        const value = String(raw[field] || existing?.[field] || "").replace(/[\u0000-\u001f]/g, " ").slice(0, 100);
+        if (value) track[field] = value;
+      }
       if (existing) Object.assign(existing, track);
       else if (state.tracks.length < MAX_TRACKS) state.tracks.push(track);
     }
@@ -318,7 +326,8 @@
       }
       if (!format || !engine.parseCues(text, format).length) throw new Error("no_cues");
       if (controller.signal.aborted || states.get(tabId) !== state || !state.tracks.includes(track)) throw new Error("navigation_changed");
-      return { ok: true, text, format, filename: safeFilename(state.title, track, format), partial: track.partial || body.partial === true };
+      return { ok: true, text, format, filename: safeFilename(state.title, track, format), partial: track.partial || body.partial === true,
+        language: track.language, label: track.label };
     } finally { jobs.delete(jobKey); }
   }
 

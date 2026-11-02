@@ -36,11 +36,14 @@ function harness(syncData = {}, localData = {}, options = {}) {
   const context = {
     window,
     URL,
+    TextEncoder,
     document: { querySelector() { return null; } },
     chrome: { storage: { sync: storageArea("sync", sync), local: storageArea("local", local) } }
   };
   vm.runInNewContext(read("subtitle-style.js"), context);
+  vm.runInNewContext(read("subtitle-dictionary.js"), context);
   vm.runInNewContext(read("subtitle-postprocess.js"), context);
+  vm.runInNewContext(read("subtitle-glossary.js"), context);
   vm.runInNewContext(read("floating-scroll-sites.js"), context);
   vm.runInNewContext(read("settings-transfer.js"), context);
   return { transfer: window.NyanKatSettingsTransfer, sync, local, writes, style: window.NyanKatSubtitleStyle };
@@ -52,6 +55,22 @@ test("popup exposes JSON export and import controls", () => {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /<script src="settings-transfer\.js"><\/script>/);
+});
+
+test("source glossary and display options travel in backups without translation cache", async () => {
+  const display = { showOriginal: true, hideSoundEffects: false, hideSpeakers: true };
+  const h = harness({}, { subtitleSourceGlossary: "桜=사쿠라", subtitleDisplayOptions: display,
+    subtitleTranslationCache: { entries: [["hash", "private translated text"]] } });
+  const exported = await h.transfer.buildExport();
+  assert.equal(exported.local.subtitleSourceGlossary, "桜=사쿠라");
+  assert.deepEqual(plain(exported.local.subtitleDisplayOptions), display);
+  assert.equal(exported.local.subtitleTranslationCache, undefined);
+  const receiving = harness();
+  await receiving.transfer.applyImport(receiving.transfer.parseImport(JSON.stringify(exported)));
+  assert.deepEqual(receiving.local.subtitleDisplayOptions, display);
+  assert.equal(receiving.local.subtitleSourceGlossary, "桜=사쿠라");
+  exported.local.subtitleDisplayOptions.showOriginal = "true";
+  assert.throws(() => receiving.transfer.parseImport(JSON.stringify(exported)), /올바르지/);
 });
 
 test("export includes all persistent settings and omits a PC-installed subtitle font", async () => {
@@ -215,4 +234,34 @@ test("local write failure restores existing and newly created sync settings", as
   assert.equal(h.sync.sendZeroOnYouTube, true);
   assert.equal(Object.hasOwn(h.sync, "enableKoneBase64AutoDecode"), false);
   assert.equal(Object.hasOwn(h.local, "subtitlePostprocessDictionary"), false);
+});
+
+
+test("persistent sync-menu visibility round-trips while older backups preserve the setting", async () => {
+  const source = harness({}, { subtitleHideSyncControls: true });
+  const file = await source.transfer.buildExport();
+  assert.equal(file.local.subtitleHideSyncControls, true);
+  const destination = harness();
+  await destination.transfer.applyImport(destination.transfer.parseImport(JSON.stringify(file)));
+  assert.equal(destination.local.subtitleHideSyncControls, true);
+  delete file.local.subtitleHideSyncControls;
+  await destination.transfer.applyImport(destination.transfer.parseImport(JSON.stringify(file)));
+  assert.equal(destination.local.subtitleHideSyncControls, true);
+  file.local.subtitleHideSyncControls = "true";
+  assert.throws(() => destination.transfer.parseImport(JSON.stringify(file)), /싱크 메뉴/);
+});
+
+test("dictionary backup quota counts combined UTF-8 bytes and preserves partial-import peers", async () => {
+  const h = harness({}, { subtitleSourceGlossary: "term=" + "한".repeat(2000) });
+  const file = { format: "nyankatx3-tab-settings", schemaVersion: 1,
+    sync: { sendZeroOnYouTube: false }, local: { subtitlePostprocessDictionary: "term=" + "글".repeat(1600) } };
+  const parsed = h.transfer.parseImport(JSON.stringify(file));
+  await assert.rejects(h.transfer.applyImport(parsed), /10 KiB/);
+  assert.equal(h.writes.length, 0, "reject before either storage area changes");
+  file.local.subtitleSourceGlossary = h.local.subtitleSourceGlossary;
+  assert.throws(() => h.transfer.parseImport(JSON.stringify(file)), /10 KiB/);
+  file.local.subtitleSourceGlossary = "";
+  await h.transfer.applyImport(h.transfer.parseImport(JSON.stringify(file)));
+  assert.equal(h.local.subtitleSourceGlossary, "");
+  assert.equal(h.local.subtitlePostprocessDictionary, file.local.subtitlePostprocessDictionary);
 });

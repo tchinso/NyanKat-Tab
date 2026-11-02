@@ -7,6 +7,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 const { File } = require("node:buffer");
 const extractor = require("../subtitle-extractor.js");
+const subtitleContext = require("../subtitle-context.js");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "download-popup.js"), "utf8");
 const TEXT = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello 한글\n";
@@ -45,17 +46,20 @@ class Element {
 async function settle() { for (let step = 0; step < 4; step += 1) await new Promise(resolve => setImmediate(resolve)); }
 
 async function harness(options = {}) {
-  const elements = Object.fromEntries(["downloadTracks", "downloadEmpty", "downloadStatus", "refreshDownloads"]
+  const elements = Object.fromEntries(["downloadTracks", "downloadEmpty", "downloadStatus", "refreshDownloads", "subtitleRememberTrack", "subtitleSearchQuery", "subtitleSearchHint", "subtitleSearchGoogle", "subtitleSearchNaver"]
     .map(id => [id, new Element(id === "downloadTracks" ? "ul" : "div")]));
   const document = new Element("document");
   document.querySelector = selector => elements[selector.slice(1)];
   document.createElement = tag => new Element(tag);
   const requests = [];
+  const saved = { ...(options.saved || {}) };
+  const opened = [];
   const imports = [];
   const intervals = new Map();
   let nextIntervalId = 1;
   const window = new Element("window");
   window.NyanKatSubtitleExtractor = extractor;
+  window.NyanKatSubtitleContext = subtitleContext;
   window.NyanKatSubtitlePopup = {
     async importExtractedSubtitle(value) {
       imports.push(value);
@@ -63,6 +67,7 @@ async function harness(options = {}) {
     }
   };
   const chrome = {
+    storage: { local: { get: async () => saved, set: async value => { Object.assign(saved, value); } } },
     runtime: {
       async sendMessage(message) {
         requests.push(message);
@@ -74,7 +79,7 @@ async function harness(options = {}) {
         return { ok: true };
       }
     },
-    tabs: { query: async () => options.query ? options.query() : [{ id: 7 }] }
+    tabs: { query: async () => options.query ? options.query() : [{ id: 7, title: "Example Show Season 2 Episode 3", url: "https://watch.example/watch?id=12345" }], create: async value => { opened.push(value); } }
   };
   vm.runInNewContext(source, {
     document, window, chrome, URL, File,
@@ -84,7 +89,7 @@ async function harness(options = {}) {
   document.emit("nyankat-popup-tab-shown", { tabName: "download" });
   await settle();
   const actions = elements.downloadTracks.children[0]?.children[1];
-  return { requests, imports, elements, window, document, intervals, translate: actions?.children[0], download: actions?.children[1] };
+  return { requests, imports, elements, window, document, intervals, saved, opened, translate: actions?.children[0], download: actions?.children[1] };
 }
 
 test("leaving the download tab during a rescan does not restart hidden polling", async () => {
@@ -222,6 +227,36 @@ test("ordinary same-URL discoveries still select the verified frame without dupl
   assert.equal(h.requests.find(request => request.type === "NYANKAT_DOWNLOAD_SAVE").id, "cached");
 });
 
+test("same-caption deduplication retains metadata while using the verified transport", async () => {
+  const named = { ...TRACK, id: "named", language: "jpn", label: "Japanese Full", producer: "Team A", forced: false, default: true, frameId: 0, verified: false };
+  const cached = { ...TRACK, id: "cached", language: "", label: "자막", source: "page-fetch", frameId: 3, documentId: "player", default: false };
+  for (const tracks of [[named, cached], [cached, named]]) {
+    const h = await harness({ tracks, prepare: () => ({ ok: true, text: TEXT, format: "vtt", filename: "captions.vtt", language: "", label: "자막" }) });
+    assert.equal(h.elements.downloadTracks.children.length, 1);
+    h.translate.emit("click");
+    await settle();
+    const imported = h.imports[0].track;
+    assert.equal(imported.id, "cached");
+    assert.equal(imported.language, "jpn");
+    assert.equal(imported.label, "Japanese Full");
+    assert.equal(imported.producer, "Team A");
+    assert.equal(imported.forced, false);
+    assert.equal(imported.default, false, "explicit false from the chosen transport is retained");
+  }
+});
+
+test("caption proxy deduplication retains metadata from its exact original rendition", async () => {
+  const original = { ...TRACK, ...ANIMEX, id: "original", language: "ja", label: "Japanese Forced", forced: true, producer: "Team A" };
+  const proxy = { ...TRACK, ...ANIMEX, id: "proxy", language: "", label: "자막", source: "html-track", url: animexProxy(original.url) };
+  const h = await harness({ tracks: [proxy, original] });
+  h.translate.emit("click");
+  await settle();
+  assert.equal(h.imports[0].track.id, "proxy");
+  assert.equal(h.imports[0].track.language, "ja");
+  assert.equal(h.imports[0].track.forced, true);
+  assert.equal(h.imports[0].track.producer, "Team A");
+});
+
 test("preparation errors show the existing reason and do not import a file", async () => {
   const h = await harness({ prepare: () => ({ ok: false, reason: "navigation_changed" }) });
   h.translate.emit("click");
@@ -257,7 +292,7 @@ test("an import failure releases the busy state so a later translation can succe
   h.translate.emit("click");
   await settle();
   assert.equal(h.imports.length, 2);
-  assert.match(h.elements.downloadStatus.textContent, /영어 → 한국어/);
+  assert.match(h.elements.downloadStatus.textContent, /원본 언어를 확인/);
 });
 
 test("partial tracks retain their warning when handed to the subtitle file tab", async () => {
@@ -283,4 +318,50 @@ test("TTML captions become a playable VTT file with the same times and text", as
   assert.deepEqual(extractor.parseCues(imported.text, "vtt").map(cue => [cue.start, cue.end, cue.text]), [
     [1.5, 3, "Hello & 한글\nSecond line"]
   ]);
+});
+
+test("extracted imports carry source track language without assuming English", async () => {
+  for (const language of ["jpn", "ko", ""]) {
+    const h = await harness({ tracks: [{ ...TRACK, language, label: language || "Unknown" }] });
+    h.translate.emit("click");
+    await settle();
+    assert.equal(h.imports[0].track.language, language);
+  }
+});
+
+test("full-dialogue classification sorts same-language tracks while preserving signs and forced choices", async () => {
+  const h = await harness({ tracks: [
+    { ...TRACK, id: "signs", url: "https://cdn.example/signs.vtt", label: "English Signs" },
+    { ...TRACK, id: "forced", url: "https://cdn.example/forced.vtt", label: "English", forced: true },
+    { ...TRACK, id: "full", url: "https://cdn.example/full.vtt", label: "English Full", default: true }
+  ] });
+  const rows = h.elements.downloadTracks.children;
+  assert.equal(rows.length, 3);
+  assert.match(rows[0].children[0].children[1].textContent, /전체 대사.*기본 트랙/);
+  assert.match(rows[1].children[0].children[1].textContent, /표지판·노래/);
+  assert.match(rows[2].children[0].children[1].textContent, /강제 표시/);
+});
+
+test("only the dedicated online subtitle search remains", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "popup.html"), "utf8");
+  assert.match(html, /href="https:\/\/sub.h2h.workers.dev\/"/);
+  assert.doesNotMatch(html, /subtitleSearchQuery|subtitleSearchGoogle|subtitleSearchNaver/);
+});
+
+test("remembering tracks is opt-in and recommends one fresh matching track", async () => {
+  const h = await harness();
+  h.download.emit("click");
+  await settle();
+  assert.equal(h.saved.subtitleTrackPreferences, undefined);
+  h.elements.subtitleRememberTrack.checked = true;
+  h.elements.subtitleRememberTrack.emit("change");
+  h.download.emit("click");
+  await settle();
+  assert.equal(h.saved.subtitleRememberTrack, true);
+  assert.equal(h.saved.subtitleTrackPreferences.length, 1);
+  assert.doesNotMatch(JSON.stringify(h.saved.subtitleTrackPreferences), /english\.vtt/);
+  const next = await harness({ saved: h.saved, tracks: [{ ...TRACK, url: "https://cdn.example/fresh.vtt", id: "fresh" }] });
+  assert.match(next.elements.downloadTracks.children[0].children[0].children[1].textContent, /선호 트랙/);
+  assert.equal(next.imports.length, 0);
+  assert.equal(next.requests.some(message => /_(SAVE|PREPARE)$/.test(message.type)), false);
 });

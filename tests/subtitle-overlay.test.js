@@ -27,12 +27,14 @@ class Element {
   }
   set innerHTML(_value) { throw new Error("Subtitle rendering must not use innerHTML"); }
   append(child) { if (child.parentElement) child.remove(); child.parentElement = this; this.children.push(child); }
+  moveBefore(child) { child.statePreservingMoves = (child.statePreservingMoves || 0) + 1; this.append(child); }
   remove() {
     if (this.parentElement) this.parentElement.children.splice(this.parentElement.children.indexOf(this), 1);
     this.parentElement = null;
   }
   contains(child) { return this === child || this.children.some(element => element.contains(child)); }
   matches(selector) {
+    if (selector === ":popover-open") return this.popoverOpen === true;
     if (selector === "*") return true;
     if (selector.startsWith(".")) return this.className.split(/\s+/).includes(selector.slice(1));
     if (selector === "source[src]") return this.tagName === "SOURCE" && this.src;
@@ -45,9 +47,13 @@ class Element {
   closest() { return null; }
   getAttribute(name) { return this.attrs[name] || null; }
   setAttribute(name, value) { this.attrs[name] = String(value); }
+  removeAttribute(name) { delete this.attrs[name]; }
+  showPopover() { this.popoverOpen = true; }
+  hidePopover() { this.popoverOpen = false; }
+  focus() { this.focused = true; }
   addEventListener(type, handler) { this.listeners.set(type, [...(this.listeners.get(type) || []), handler]); }
   removeEventListener(type, handler) { this.listeners.set(type, (this.listeners.get(type) || []).filter(listener => listener !== handler)); }
-  emit(type) { for (const listener of this.listeners.get(type) || []) listener(); }
+  emit(type, event) { for (const listener of this.listeners.get(type) || []) listener(event); }
   getBoundingClientRect() { return { left: 20, top: 30, right: 1300, bottom: 750, width: 1280, height: 720 }; }
 }
 
@@ -121,7 +127,9 @@ async function harness(options = {}) {
   window.NyanKatSubtitleStyle.ensureFont = async (_document, font) => { fontRequests.push(font); return true; };
   vm.runInContext(read("subtitle-parser.js"), context);
   vm.runInContext(read("subtitle-translation.js"), context);
+  vm.runInContext(read("subtitle-dictionary.js"), context);
   vm.runInContext(read("subtitle-postprocess.js"), context);
+  vm.runInContext(read("subtitle-display.js"), context);
   vm.runInContext(read("subtitle-overlay.js"), context);
   await settle();
   function message(type, payload = {}) {
@@ -522,6 +530,51 @@ test("translation host is created in the top frame and is removed for a new sess
   assert.equal(embedded.message("NYANKAT_SUBTITLE_TRANSLATION_HOST_ENSURE").ok, false);
 });
 
+test("translation preparation waits out native fullscreen and preserves its iframe in container fullscreen", async () => {
+  const h = await harness();
+  h.message("NYANKAT_SUBTITLE_TRANSLATION_HOST_ENSURE");
+  const host = h.document.querySelector("iframe");
+  assert.equal(host.hidden, true);
+  assert.equal(host.matches(":popover-open"), false);
+  const visibility = visible => {
+    for (const listener of h.chrome.runtime.onMessage.listeners) {
+      listener({ type: "NYANKAT_SUBTITLE_TRANSLATION_HOST_VISIBILITY", visible }, {}, () => {});
+    }
+  };
+  visibility(true);
+  assert.equal(host.hidden, false);
+  assert.equal(host.matches(":popover-open"), true);
+  assert.equal(host.getAttribute("popover"), "manual");
+  h.document.fullscreenElement = h.video;
+  h.document.emit("fullscreenchange");
+  assert.equal(host.hidden, true);
+  assert.equal(host.matches(":popover-open"), false);
+  assert.match(h.layer("fullscreen-note").textContent, /전체화면 종료 후/);
+  assert.equal(host.src, "chrome-extension://test/subtitle-translation-host.html");
+  h.document.fullscreenElement = null;
+  h.document.emit("fullscreenchange");
+  assert.equal(host.hidden, false, "the pending model preparation is restored after exiting native fullscreen");
+  assert.equal(host.matches(":popover-open"), true);
+  assert.equal(h.layer("fullscreen-note"), null);
+  const container = new Element("div");
+  h.document.documentElement.append(container);
+  h.document.fullscreenElement = container;
+  h.document.emit("fullscreenchange");
+  assert.equal(host.parentElement, container, "fullscreen siblings are inert even when they are open popovers");
+  assert.equal(host.statePreservingMoves, 1);
+  assert.equal(host.hidden, false);
+  assert.equal(host.matches(":popover-open"), true);
+  visibility(false);
+  assert.equal(host.hidden, true);
+  assert.equal(host.matches(":popover-open"), false);
+  assert.equal(host.getAttribute("popover"), null);
+  h.document.fullscreenElement = null;
+  h.document.emit("fullscreenchange");
+  assert.equal(host.parentElement, h.document.documentElement);
+  assert.equal(host.statePreservingMoves, 2);
+  assert.equal(host.hidden, true, "fullscreen exit never resurrects a dismissed or unneeded prompt");
+});
+
 test("moving an active translated cue into a timing gap clears text and cancels the old stream", async () => {
   const h = await harness();
   loadTranslated(h);
@@ -604,4 +657,243 @@ test("a disconnect after translation finishes preserves the completed cue", asyn
   port.onMessage.emit({ type: "done", requestId: request.requestId, text: "완성된 번역" });
   port.onDisconnect.emit();
   assert.equal(h.layer("fill").textContent, "완성된 번역");
+});
+
+test("bilingual display updates saved options live without translating again and clears on gaps", async () => {
+  const h = await harness({ saved: { subtitleDisplayOptions: { showOriginal: true } } });
+  loadTranslated(h);
+  const port = h.translationPorts[0];
+  const request = port.messages.find(message => message.type === "translate");
+  assert.equal(h.layer("original").hidden, true, "a pending translation shows the source once");
+  port.onMessage.emit({ type: "done", requestId: request.requestId, text: "플라스틱 뚜껑\n둘째 줄" });
+  assert.equal(h.layer("fill").textContent, "플라스틱 뚜껑\n둘째 줄");
+  assert.equal(h.layer("original").textContent, "Plastic lid\nsecond line");
+  assert.equal(h.layer("original").hidden, false);
+  const count = port.messages.length;
+  h.chrome.storage.onChanged.emit({ subtitleDisplayOptions: { newValue: { showOriginal: false } } }, "local");
+  assert.equal(h.layer("original").hidden, true);
+  h.message("NYANKAT_SUBTITLE_SET_DISPLAY", { options: { showOriginal: true } });
+  assert.equal(h.layer("original").hidden, false);
+  assert.equal(port.messages.length, count, "display settings use the already translated result");
+  h.video.currentTime = 4;
+  h.video.emit("timeupdate");
+  assert.equal(h.layer("original").hidden, true);
+  assert.equal(h.layer("original").textContent, "");
+  assert.equal(h.layer("text").hidden, true);
+});
+
+test("live speech shows its recognized source below translation and hides file-only sync controls", async () => {
+  const h = await harness({ saved: { subtitleDisplayOptions: { showOriginal: true } } });
+  h.video.paused = false;
+  h.message("NYANKAT_SUBTITLE_SPEECH", { session: "speech", action: "begin" });
+  assert.equal(h.layer("sync").hidden, true);
+  h.message("NYANKAT_SUBTITLE_SPEECH", { session: "speech", action: "text", revision: 0, text: "こんにちは" });
+  const port = h.translationPorts.at(-1);
+  const request = port.messages.findLast(message => message.type === "translate");
+  port.onMessage.emit({ type: "done", requestId: request.requestId, text: "안녕하세요" });
+  assert.equal(h.layer("fill").textContent, "안녕하세요");
+  assert.equal(h.layer("original").textContent, "こんにちは");
+  assert.equal(h.layer("original").hidden, false);
+  h.video.emit("seeking");
+  assert.equal(h.layer("original").hidden, true);
+  h.load();
+  assert.equal(h.layer("sync").hidden, false);
+});
+
+test("caption filters change only displayed text and preserve source sent to translation", async () => {
+  const h = await harness({ saved: { subtitleDisplayOptions: { hideSoundEffects: true, hideSpeakers: true, showOriginal: true } } });
+  const source = "SOTA: Hey!\n[sighs]\n(I should go)";
+  h.message("NYANKAT_SUBTITLE_LOAD", { sourceLanguage: "en", filename: "captions.srt",
+    b64: Buffer.from("1\n00:00:01,000 --> 00:00:03,000\n" + source).toString("base64") });
+  assert.equal(h.layer("fill").textContent, "Hey!\n(I should go)");
+  const port = h.translationPorts.at(-1);
+  const request = port.messages.findLast(message => message.type === "translate");
+  assert.equal(request.text, source);
+  port.onMessage.emit({ type: "done", requestId: request.requestId, text: "소타: 안녕!\n[한숨]\n(가야 할까)" });
+  assert.equal(h.layer("fill").textContent, "안녕!\n(가야 할까)");
+  assert.equal(h.layer("original").textContent, "Hey!\n(I should go)");
+  h.message("NYANKAT_SUBTITLE_SET_DISPLAY", { options: { showOriginal: true } });
+  assert.equal(h.layer("fill").textContent, "소타: 안녕!\n[한숨]\n(가야 할까)");
+  assert.equal(h.layer("original").textContent, source);
+});
+
+test("effect-only source cues stay hidden even if translation removes their brackets", async () => {
+  const h = await harness({ saved: { subtitleDisplayOptions: { hideSoundEffects: true } } });
+  h.message("NYANKAT_SUBTITLE_LOAD", { sourceLanguage: "ja", filename: "effects.srt",
+    b64: Buffer.from("1\n00:00:01,000 --> 00:00:03,000\n（ため息）").toString("base64") });
+  const port = h.translationPorts.at(-1);
+  const request = port.messages.findLast(message => message.type === "translate");
+  port.onMessage.emit({ type: "done", requestId: request.requestId, text: "한숨" });
+  assert.equal(h.layer("text").hidden, true);
+  h.message("NYANKAT_SUBTITLE_SET_DISPLAY", { options: {} });
+  assert.equal(h.layer("fill").textContent, "한숨");
+});
+
+test("in-video sync steps show direction and cumulative offset and remain local to their video", async () => {
+  const h = await harness();
+  h.load();
+  assert.equal(h.layer("sync-panel").hidden, true);
+  h.layer("sync-toggle").emit("click");
+  assert.equal(h.layer("sync-panel").hidden, false);
+  h.layer("sync-later").emit("click");
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.offsetMs, 200);
+  assert.match(h.layer("sync-notice").textContent, /0.2초 늦게.*누적 0.2초 늦게/);
+  h.layer("sync-earlier").emit("click");
+  h.layer("sync-earlier").emit("click");
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.offsetMs, -200);
+  assert.match(h.layer("sync-notice").textContent, /누적 0.2초 빠르게/);
+  const second = new Video();
+  h.document.documentElement.append(second);
+  h.message("NYANKAT_SUBTITLE_PING");
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS", { videoId: "video-2" }).state.offsetMs, 0);
+});
+
+test("sync controls close on a local Escape or video click without capturing document shortcuts", async () => {
+  const h = await harness();
+  h.load();
+  const toggle = h.layer("sync-toggle");
+  toggle.emit("click");
+  let stopped = false;
+  let prevented = false;
+  h.layer("sync").emit("keydown", { key: "Escape", stopPropagation() { stopped = true; }, preventDefault() { prevented = true; } });
+  assert.equal(stopped, true);
+  assert.equal(prevented, true);
+  assert.equal(h.layer("sync-panel").hidden, true);
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(toggle.focused, true);
+  toggle.emit("click");
+  h.video.emit("pointerdown");
+  assert.equal(h.layer("sync-panel").hidden, true);
+  assert.equal(h.document.listeners.has("keydown"), false);
+  h.message("NYANKAT_SUBTITLE_UNLOAD");
+  assert.equal(h.video.listeners.get("pointerdown").length, 0);
+});
+
+test("native video fullscreen displays subtitles with controls hidden, then restores interactive controls", async () => {
+  const h = await harness();
+  h.load();
+  h.document.fullscreenElement = h.video;
+  h.document.emit("fullscreenchange");
+  h.layout();
+  const overlay = h.layer("overlay");
+  assert.equal(overlay.parentElement, h.document.documentElement, "video fallback children are not a visible fullscreen host");
+  assert.equal(overlay.getAttribute("popover"), "manual");
+  assert.equal(overlay.matches(":popover-open"), true);
+  assert.equal(overlay.style.position, "fixed");
+  assert.equal(h.layer("sync").hidden, true, "Chromium makes elements outside fullscreen video inert");
+  assert.equal(h.layer("fullscreen-note"), null, "ordinary viewing has no permanent notice");
+  const container = new Element("div");
+  h.document.documentElement.append(container);
+  container.append(h.video);
+  h.document.fullscreenElement = container;
+  h.document.emit("fullscreenchange");
+  h.layout();
+  assert.equal(overlay.matches(":popover-open"), false);
+  assert.equal(overlay.getAttribute("popover"), null);
+  assert.equal(overlay.parentElement, container);
+  assert.equal(overlay.style.position, "absolute");
+  assert.equal(h.layer("sync").hidden, false);
+  h.layer("sync-later").emit("click");
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.offsetMs, 200);
+  h.document.fullscreenElement = null;
+  h.document.emit("fullscreenchange");
+  h.layout();
+  assert.equal(overlay.parentElement, h.document.documentElement);
+  assert.equal(overlay.style.position, "fixed");
+});
+
+test("entering native fullscreen with sync panel open explains where the controls went", async () => {
+  const h = await harness();
+  h.load();
+  h.layer("sync-toggle").emit("click");
+  h.document.fullscreenElement = h.video;
+  h.document.emit("fullscreenchange");
+  h.layout();
+  assert.equal(h.layer("sync").hidden, true);
+  assert.match(h.layer("fullscreen-note").textContent, /싱크 조절/);
+  h.document.fullscreenElement = null;
+  h.document.emit("fullscreenchange");
+  h.layout();
+  assert.equal(h.layer("fullscreen-note"), null);
+  assert.equal(h.layer("sync").hidden, false);
+  assert.equal(h.layer("sync-panel").hidden, false);
+});
+
+test("two-point controls capture raw cue/video times, preview, apply and reset calibration", async () => {
+  const h = await harness();
+  const source = "1\n00:00:10,000 --> 00:00:12,000\nFirst\n\n2\n00:10:10,000 --> 00:10:12,000\nSecond";
+  h.message("NYANKAT_SUBTITLE_LOAD", { filename: "drift.srt", b64: Buffer.from(source).toString("base64") });
+  h.layer("sync-toggle").emit("click");
+  h.video.currentTime = 12;
+  h.layer("sync-first").emit("click");
+  assert.equal(h.layer("sync-second").disabled, false);
+  h.layer("sync-next").emit("click");
+  h.video.currentTime = 614;
+  h.layer("sync-second").emit("click");
+  assert.equal(h.layer("sync-apply").disabled, false);
+  assert.match(h.layer("sync-points").textContent, /적용할 값/);
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.syncRate, 1, "capture only previews");
+  h.layer("sync-apply").emit("click");
+  const state = h.message("NYANKAT_SUBTITLE_GET_STATUS").state;
+  assert.ok(Math.abs((614 - state.offsetMs / 1000) * state.syncRate - 610) < 1e-8);
+  assert.ok(Math.abs((12 - state.offsetMs / 1000) * state.syncRate - 10) < 1e-8);
+  assert.equal(h.layer("fill").textContent, "Second");
+  h.layer("sync-reset").emit("click");
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.syncRate, 1);
+  assert.equal(h.message("NYANKAT_SUBTITLE_GET_STATUS").state.offsetMs, 0);
+  assert.equal(h.layer("sync-points").textContent, "");
+  assert.equal(h.layer("sync-apply").disabled, true);
+  assert.equal(h.layer("sync-second").disabled, true);
+});
+
+test("glossary edits rerun a completed current translation and discard replies from its old port", async () => {
+  const h = await harness();
+  loadTranslated(h);
+  const old = h.translationPorts.at(-1);
+  const first = old.messages.findLast(message => message.type === "translate");
+  old.onMessage.emit({ type: "done", requestId: first.requestId, text: "이전 이름" });
+  h.chrome.storage.onChanged.emit({ subtitleSourceGlossary: { newValue: "Plastic=새 이름" } }, "local");
+  assert.equal(old.disconnected, true);
+  assert.equal(h.layer("fill").textContent, "Plastic lid\nsecond line");
+  const current = h.translationPorts.at(-1);
+  assert.notEqual(current, old);
+  assert.equal(current.messages.findLast(message => message.type === "translate").text, "Plastic lid\nsecond line");
+  old.onMessage.emit({ type: "done", requestId: first.requestId, text: "오래된 결과" });
+  assert.equal(h.layer("fill").textContent, "Plastic lid\nsecond line");
+});
+
+
+test("sync visibility combines remembered settings and episode-local hiding", async () => {
+  const h = await harness({ saved: { subtitleHideSyncControls: true } });
+  h.load();
+  h.layout();
+  assert.equal(h.layer("sync").hidden, true);
+  h.chrome.storage.onChanged.emit({ subtitleHideSyncControls: { newValue: false } }, "local");
+  assert.equal(h.layer("sync").hidden, false);
+  h.layer("sync-toggle").emit("click");
+  h.layer("sync-hide-episode").emit("click");
+  assert.equal(h.layer("sync").hidden, true);
+  assert.equal(h.layer("sync-panel").hidden, true);
+  h.video.emit("seeked");
+  h.layout();
+  assert.equal(h.layer("sync").hidden, true, "seeking keeps the episode preference");
+  h.video.emit("loadedmetadata");
+  h.layout();
+  assert.equal(h.layer("sync").hidden, false, "reused video element restores controls on a new episode");
+  h.layer("sync-hide-episode").emit("click");
+  h.load();
+  assert.equal(h.layer("sync").hidden, false, "loading the next subtitle also restores controls");
+  h.chrome.storage.onChanged.emit({ subtitleHideSyncControls: { newValue: true } }, "local");
+  h.video.emit("loadedmetadata");
+  h.layout();
+  assert.equal(h.layer("sync").hidden, true, "new episodes respect the permanent preference");
+});
+
+test("Korean source ignores remembered translation display filters", async () => {
+  const h = await harness({ saved: { subtitleDisplayOptions: { hideSoundEffects: true, hideSpeakers: true, showOriginal: true } } });
+  const text = "소타: 안녕!\n[한숨]";
+  h.message("NYANKAT_SUBTITLE_LOAD", { sourceLanguage: "ko", filename: "captions.srt",
+    b64: Buffer.from("1\n00:00:01,000 --> 00:00:03,000\n" + text).toString("base64") });
+  assert.equal(h.layer("fill").textContent, text);
+  assert.equal(h.layer("original").hidden, true);
 });

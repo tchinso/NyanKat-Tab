@@ -213,6 +213,7 @@ function makePage(url = "https://www.youtube.com/watch?v=example", settings = {}
     },
     requestAnimationFrame(callback) { animationFrames.set(++nextAnimationFrame, callback); return nextAnimationFrame; },
     cancelAnimationFrame(id) { animationFrames.delete(id); },
+    clearTimeout() {},
     addEventListener(name, listener) {
       const listeners = windowListeners.get(name) || [];
       listeners.push(listener);
@@ -266,6 +267,9 @@ function makePage(url = "https://www.youtube.com/watch?v=example", settings = {}
     }
   }
   return {
+    runScript(filename) {
+      vm.runInContext(fs.readFileSync(path.join(root, filename), "utf8"), context, { filename });
+    },
     document,
     window,
     body,
@@ -503,4 +507,15 @@ test("the floating button hides during YouTube CSS fullscreen and returns on exi
     { type: "attributes", target: player, attributeName: "class" }
   ]);
   assert.equal(page.button().style.display, "grid");
+});
+
+
+test("KONE decoder and floating scroll keep independent settings callbacks in the same frame", () => {
+  const page = makePage("https://kone.gg/post/1", { enableKoneBase64AutoDecode: false });
+  assert.ok(page.button());
+  page.runScript("kone-base64-decoder.js");
+  page.updateSettings({ floatingScrollSettings: { enabled: false } });
+  assert.equal(page.button(), null, "scroll changes still reach the scroll settings handler");
+  page.updateSettings({ floatingScrollSettings: { enabled: true } });
+  assert.ok(page.button());
 });

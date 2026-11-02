@@ -87,9 +87,17 @@
 
         <div class="subtitle-row file-row">
           <label for="subtitleFile">자막 파일</label>
-          <input id="subtitleFile" type="file" accept=".srt,.vtt,.ass,.ssa,.smi,.sami,.txt">
+          <input id="subtitleFile" type="file" accept=".srt,.vtt,.ass,.ssa,.smi,.sami,.sub,.txt,.zip">
         </div>
         <small id="subtitleImportedFileName" hidden></small>
+        <div id="subtitleArchiveFields" class="subtitle-row" hidden>
+          <label for="subtitleArchiveEntry">ZIP 안의 자막</label>
+          <select id="subtitleArchiveEntry"><option value="">파일을 선택하세요</option></select>
+        </div>
+        <div id="subtitleFpsFields" class="subtitle-row" hidden>
+          <label for="subtitleFps">MicroDVD FPS</label>
+          <input id="subtitleFps" type="number" min="1" max="240" step="0.001" placeholder="예: 23.976">
+        </div>
 
         <div class="subtitle-row">
           <label for="subtitleEncoding">인코딩</label>
@@ -107,21 +115,48 @@
           <label for="subtitleLanguage">자막 원문 언어</label>
           <select id="subtitleLanguage"></select>
         </div>
-        <button id="subtitlePostprocessSettings" class="link-button" type="button" hidden>번역 문구 바꾸기</button>
-
+        <div id="subtitleTranslationSettings" hidden>
+          <div class="subtitle-actions">
+            <button id="subtitlePreprocessSettings" class="link-button" type="button">번역 전처리 설정</button>
+            <button id="subtitlePostprocessSettings" class="link-button" type="button">번역 후처리 설정</button>
+          </div>
+          <fieldset class="subtitle-style-group">
+            <legend>자막 표시</legend>
+            <label class="subtitle-option"><input id="subtitleShowOriginal" type="checkbox"> 번역 아래 원문 함께 보기</label>
+            <label class="subtitle-option"><input id="subtitleHideSoundEffects" type="checkbox"> 효과음 설명 숨기기</label>
+            <label class="subtitle-option"><input id="subtitleHideSpeakers" type="checkbox"> 화자명 숨기기</label>
+            <small>파일·음성 자막에 적용합니다. 원본 파일은 그대로 보존됩니다.</small>
+          </fieldset>
+        </div>
         <dialog id="subtitlePostprocessDialog" aria-labelledby="subtitlePostprocessTitle">
           <form id="subtitlePostprocessForm">
-            <h2 id="subtitlePostprocessTitle">번역 문구 바꾸기</h2>
-            <label for="subtitlePostprocessDictionary">치환 목록</label>
+            <h2 id="subtitlePostprocessTitle">번역 사전 관리</h2>
+            <label for="subtitleSourceGlossary">전처리 사전 · 번역 전처리 설정</label>
+            <p class="subtitle-hint">원문 고유명사=한국어 표기를 한 줄씩 입력하세요. 번역 전에 적용됩니다.</p>
+            <textarea id="subtitleSourceGlossary" rows="5" spellcheck="false" placeholder="桜=사쿠라"></textarea>
+            <label for="subtitlePostprocessDictionary">후처리 사전 · 번역 후처리 설정</label>
             <p class="subtitle-hint">기존 문구=바꿀 문구를 한 줄씩 입력하세요. 번역 결과에 적용됩니다.</p>
-            <textarea id="subtitlePostprocessDictionary" rows="10" maxlength="65536" spellcheck="false" placeholder="플라스틱 뚜껑=플라흐타"></textarea>
+            <textarea id="subtitlePostprocessDictionary" rows="5" spellcheck="false" placeholder="플라스틱 뚜껑=플라흐타"></textarea>
+            <p id="subtitleDictionaryUsage" class="subtitle-hint" aria-live="polite"></p>
             <p id="subtitlePostprocessStatus" class="subtitle-hint" aria-live="polite"></p>
             <div class="subtitle-actions">
-              <button id="saveSubtitlePostprocess" class="primary-button" type="submit">저장</button>
+              <button id="saveSubtitlePostprocess" class="primary-button" type="submit">사전 저장</button>
+              <button id="clearSubtitleDictionaries" type="button">저장된 사전 삭제</button>
               <button id="cancelSubtitlePostprocess" type="button">취소</button>
             </div>
           </form>
         </dialog>
+        <details class="subtitle-style-group">
+          <summary>번역 저장 관리</summary>
+          <p class="subtitle-hint">완료한 번역은 이 기기에 저장해 다음 시청에 재사용합니다.</p>
+          <button id="clearSubtitleTranslationCache" type="button">저장된 번역 삭제</button>
+          <p id="subtitleTranslationCacheStatus" class="subtitle-hint" aria-live="polite"></p>
+        </details>
+
+        <div class="subtitle-actions">
+          <button id="loadSubtitle" class="primary-button" type="button">자막 적용</button>
+          <button id="unloadSubtitle" type="button">자막 제거</button>
+        </div>
 
         <div class="subtitle-row sync-row">
           <label for="subtitleOffset">자막 싱크</label>
@@ -138,7 +173,8 @@
               <button type="button" data-offset-adjust="1000" aria-label="자막 1초 늦추기">+1</button>
               <button type="button" data-offset-adjust="10000" aria-label="자막 10초 늦추기">+10</button>
             </div>
-            <small id="offsetHint">−는 자막을 앞당기고, +는 늦춥니다.</small>
+            <label class="subtitle-option"><input id="subtitleHideSyncControls" type="checkbox"> 재생화면 싱크 버튼 항상 숨기기</label>
+            <small id="offsetHint">−는 자막을 앞당기고, +는 늦춥니다. 재생 화면의 ‘싱크’에서 0.2초 조정과 두 지점 보정도 할 수 있습니다.</small>
           </div>
         </div>
 
@@ -166,10 +202,6 @@
           </div>
         </div>
 
-        <div class="subtitle-actions">
-          <button id="loadSubtitle" class="primary-button" type="button">자막 적용</button>
-          <button id="unloadSubtitle" type="button">자막 제거</button>
-        </div>
 
         </section>
 
@@ -368,6 +400,7 @@
           <h2>페이지 자막</h2>
         </div>
         <button id="refreshDownloads" class="link-button" type="button">자막 다시 검색</button>
+        <label class="subtitle-option"><input id="subtitleRememberTrack" type="checkbox"> 작품별로 선택한 언어·트랙 기억하기</label>
         <p id="downloadEmpty">감지된 자막이 없습니다. 재생 페이지를 새로고침한 뒤 자막을 켜 보세요.</p>
         <ul id="downloadTracks" class="download-tracks" aria-label="감지된 자막"></ul>
         <p id="downloadStatus" class="subtitle-status" aria-live="polite"></p>
@@ -392,7 +425,9 @@
 
     <script src="popup.js"></script>
     <script src="subtitle-style.js"></script>
+    <script src="subtitle-dictionary.js"></script>
     <script src="subtitle-postprocess.js"></script>
+    <script src="subtitle-glossary.js"></script>
     <script src="floating-scroll-sites.js"></script>
     <script src="settings-transfer.js"></script>
   </body>

@@ -44,6 +44,8 @@
     if (value.complete === true) result.complete = true;
     if (value.partial === true) result.partial = true;
     if (value.verified === true) result.verified = true;
+    for (const key of ["forced", "default"]) if (typeof value[key] === "boolean") result[key] = value[key];
+    for (const key of ["role", "producer"]) if (typeof value[key] === "string") result[key] = clean(value[key], 100);
     if (typeof value.representationId === "string") result.representationId = clean(value.representationId, 250);
     if (Number.isFinite(value.cueCount)) result.cueCount = Math.min(30000, Math.max(0, Math.floor(value.cueCount)));
     return result;

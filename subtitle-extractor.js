@@ -228,6 +228,10 @@
         ...(format ? { format } : {}), kind: /^(?:hls|dash)$/.test(context.kind || "") ? context.kind : format === "m3u8" ? "hls" : format === "mpd" ? "dash" : "file",
         source: context.source || "metadata", ...(context.representationId ? { representationId: context.representationId } : {}),
         ...(context.adaptationId ? { adaptationId: context.adaptationId } : {}),
+        ...(typeof context.forced === "boolean" ? { forced: context.forced } : {}),
+        ...(typeof context.default === "boolean" ? { default: context.default } : {}),
+        ...(context.role ? { role: String(context.role).slice(0, 100) } : {}),
+        ...(context.producer ? { producer: String(context.producer).slice(0, 100) } : {}),
         ...(context.unsupported ? { unsupported: context.unsupported } : {}), ...(context.partial ? { partial: true } : {}) });
     }
     function visit(item, context = {}, depth = 0) {
@@ -277,11 +281,16 @@
       const language = get("srclang", "language", "lang", "languagecode", "locale");
       const representationId = get("representationid");
       const adaptationId = get("adaptationid");
+      const flag = value => typeof value === "boolean" ? value : /^(?:yes|true|1)$/i.test(String(value)) ? true : /^(?:no|false|0)$/i.test(String(value)) ? false : undefined;
       const childContext = { ...context, kind, type, format: type,
         label: typeof label === "string" ? label : context.label,
         language: typeof language === "string" ? language : context.language,
         representationId: typeof representationId === "string" ? representationId.slice(0, 200) : context.representationId,
         adaptationId: typeof adaptationId === "string" ? adaptationId.slice(0, 200) : context.adaptationId,
+        forced: flag(get("forced", "isforced")) ?? context.forced,
+        default: flag(get("default", "isdefault")) ?? context.default,
+        role: typeof get("role") === "string" ? get("role").slice(0, 100) : context.role,
+        producer: typeof get("producer", "group", "fansub") === "string" ? get("producer", "group", "fansub").slice(0, 100) : context.producer,
         semantic: context.semantic || SEMANTIC_KIND.test(kind) || /(?:text\/(?:vtt|srt)|ttml|subrip)/i.test(type)
           || (context.trackContainer && !kind && !type && (typeof language === "string" || typeof label === "string")) };
       const forbidden = /^(?:audio|video|image|images|thumbnails|storyboard|chapters|metadata)$/i.test(kind) || /^(?:audio|video|image)\//i.test(type);
@@ -426,7 +435,7 @@
           const mime = attr(representation, "mimeType") || attr(adaptation, "mimeType") || "";
           const codec = attr(representation, "codecs") || attr(adaptation, "codecs") || "";
           const contentType = attr(representation, "contentType") || attr(adaptation, "contentType") || "";
-          const roles = children(adaptation, "role").map(role => attr(role, "value") || "");
+          const roles = [...children(adaptation, "role"), ...(representation === adaptation ? [] : children(representation, "role"))].map(role => attr(role, "value") || "");
           const isText = contentType === "text" || /^text\//i.test(mime) || /ttml|vtt/i.test(mime) || /(?:stpp|wvtt)/i.test(codec) || roles.some(role => /^(?:subtitle|caption)s?$/i.test(role));
           if (!isText || /^(?:video|audio)\//i.test(mime) || /^(?:video|audio)$/.test(contentType)) continue;
           const adaptationBase = withBase(adaptation, periodBase);
@@ -442,7 +451,7 @@
           const label = nodeText(children(adaptation, "label")[0] || "").trim() || language || "Subtitles";
           const track = { url: template || segmentList || segmentBase ? baseUrl : repBase, representationId: attr(representation, "id") || "", adaptationId: attr(adaptation, "id") || "",
             language, label, format, kind: template || segmentList || segmentBase ? "dash" : "file", source: "DASH subtitles", segments: [], periodStart,
-            periodDuration, periodCount: 1,
+            periodDuration, periodCount: 1, role: roles.join(" ").slice(0, 100), forced: roles.some(role => /^(?:forced|forced-subtitle)$/i.test(role)),
             unsupported: encrypted ? "encrypted" : binary ? "binary-subtitles" : segmentBase ? "byte-range" : null };
           if (template && !track.unsupported) {
             const scale = Number(attr(template, "timescale") || 1);

@@ -9,6 +9,24 @@ const extractor = require("../subtitle-extractor.js");
 const BASE = "https://cdn.example/video/episode/master.m3u8?token=secret";
 const vtt = (body) => `WEBVTT\n\n${body}`;
 
+test("HLS rendition flags survive generic discovery and player metadata retains producer", () => {
+  const text = '#EXTM3U\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",FORCED=YES,DEFAULT=NO,URI="forced.m3u8"';
+  const track = extractor.discover(text, BASE)[0];
+  assert.equal(track.forced, true);
+  assert.equal(track.default, false);
+  const config = extractor.discover({ subtitles: [{ url: "/ja.vtt", language: "ja", label: "Japanese Full", isForced: false, default: true, producer: "Team A" }] }, BASE)[0];
+  assert.equal(config.forced, false);
+  assert.equal(config.default, true);
+  assert.equal(config.producer, "Team A");
+});
+
+test("DASH forced subtitle role is preserved in extracted renditions", () => {
+  const text = '<MPD><Period><AdaptationSet mimeType="text/vtt" lang="en"><Role value="forced-subtitle"/><Representation id="en"><BaseURL>forced.vtt</BaseURL></Representation></AdaptationSet></Period></MPD>';
+  const track = extractor.parseDash(text, BASE).tracks[0];
+  assert.equal(track.forced, true);
+  assert.equal(track.role, "forced-subtitle");
+});
+
 function animexProxy(payload) {
   const bytes = Buffer.from(payload);
   const key = "10b06cdc1ca48c9fb0b94af97cc040cf";

@@ -4,7 +4,8 @@ const YOUTUBE_DEFAULT_SETTINGS = {
   sendZeroOnYouTube: true
 };
 
-let sendZeroOnYouTube = true;
+let sendZeroOnYouTube = false;
+let settingsChanged = false;
 let lastHandledVideoKey = "";
 let pendingTimer = 0;
 let lastSeenUrl = location.href;
@@ -171,12 +172,14 @@ function scheduleHandleWatchPage() {
 }
 
 chrome.storage.sync.get(YOUTUBE_DEFAULT_SETTINGS, (settings) => {
+  if (settingsChanged) return;
   sendZeroOnYouTube = settings.sendZeroOnYouTube !== false;
   scheduleHandleWatchPage();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "sync" && changes.sendZeroOnYouTube) {
+    settingsChanged = true;
     sendZeroOnYouTube = changes.sendZeroOnYouTube.newValue !== false;
     if (sendZeroOnYouTube) {
       lastHandledVideoKey = "";

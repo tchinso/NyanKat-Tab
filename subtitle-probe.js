@@ -91,6 +91,8 @@
     if (value.partial === true) track.partial = true;
     if (value.complete === true) track.complete = true;
     if (value.verified === true) track.verified = true;
+    for (const key of ["forced", "default"]) if (typeof value[key] === "boolean") track[key] = value[key];
+    for (const key of ["role", "producer"]) if (typeof value[key] === "string") track[key] = clean(value[key], 100);
     if (typeof value.representationId === "string") track.representationId = clean(value.representationId, 250);
     if (Number.isFinite(value.cueCount)) track.cueCount = Math.max(0, Math.floor(value.cueCount));
     const key = resolved + (track.representationId ? "\u0000" + track.representationId : "");
@@ -100,6 +102,7 @@
       if ((!track.label || track.label === "자막") && old.label) track.label = old.label;
       if (!track.language) track.language = old.language;
       if (!track.format) track.format = old.format;
+      for (const key of ["forced", "default", "role", "producer"]) if (track[key] === undefined && old[key] !== undefined) track[key] = old[key];
       if (old.verified === true) track.verified = true;
       if (source === "network" && old.source !== "network") track.source = old.source;
       if (JSON.stringify(old) === JSON.stringify(track)) return;
@@ -184,7 +187,14 @@
           }
           inspectText(child, url, "", source || "inline-captions");
           const cached = resources.get(url);
-          if (cached) addTrack({ url, format: cached.format, verified: true, complete: true, label: ownValue(entry.value, "label") || ownValue(entry.value, "language") || "자막" }, source || "inline-captions");
+          if (cached) addTrack({
+            url, format: cached.format, verified: true, complete: true,
+            label: ownValue(entry.value, "label") || ownValue(entry.value, "language") || "자막",
+            language: ownValue(entry.value, "language") || ownValue(entry.value, "srclang") || ownValue(entry.value, "lang"),
+            producer: ownValue(entry.value, "producer") || ownValue(entry.value, "group"),
+            role: ownValue(entry.value, "role"),
+            forced: ownValue(entry.value, "forced"), default: ownValue(entry.value, "default")
+          }, source || "inline-captions");
         } else if (child && typeof child === "object" && entry.depth < 8) {
           queue.push({ value: child, depth: entry.depth + 1 });
         }
@@ -479,7 +489,7 @@
   function scanTrackElement(element) {
     if (isOwnOverlay(element) || !/^(?:subtitles|captions)$/i.test(element.kind || element.getAttribute("kind") || "subtitles")) return;
     const src = element.src || element.getAttribute("src");
-    if (src) addTrack({ url: src, label: element.label, language: element.srclang, kind: element.kind }, "html-track");
+    if (src) addTrack({ url: src, label: element.label, language: element.srclang, kind: element.kind, default: element.default === true }, "html-track");
   }
 
   function nativeEntry(track, video) {

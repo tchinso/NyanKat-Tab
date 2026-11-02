@@ -10,6 +10,8 @@ body {
   min-width: 400px;
 }
 
+[hidden] { display: none !important; }
+
 header {
   align-items: center;
   border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
@@ -83,10 +85,6 @@ main {
   padding: 12px;
 }
 
-.tab-panel[hidden] {
-  display: none;
-}
-
 .subtitle-tab-list {
   margin: -12px -12px 0;
   padding-top: 0;
@@ -96,10 +94,6 @@ main {
   display: grid;
   gap: 10px;
   min-width: 0;
-}
-
-.subtitle-subpanel[hidden] {
-  display: none;
 }
 
 .toggle-row,
@@ -232,10 +226,6 @@ footer {
 .style-fields {
   display: grid;
   gap: 10px;
-}
-
-.style-fields[hidden] {
-  display: none;
 }
 
 .subtitle-style-group .subtitle-row {
@@ -508,12 +498,26 @@ button:hover {
   width: 100%;
 }
 
+#subtitleSourceGlossary,
 #subtitlePostprocessDictionary {
   box-sizing: border-box;
   width: 100%;
   resize: vertical;
   font: 13px/1.6 "Malgun Gothic", sans-serif;
 }
+
+.subtitle-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 9px 0;
+  font-size: 13px;
+}
+
+details.subtitle-style-group > summary { cursor: pointer; margin-bottom: 10px; }
+#subtitleSearchQuery { box-sizing: border-box; width: 100%; margin: 7px 0; }
+#subtitleArchiveEntry { min-width: 0; }
+#subtitleSearchHint { display: block; margin-bottom: 8px; }
 
 button:disabled {
   cursor: default;

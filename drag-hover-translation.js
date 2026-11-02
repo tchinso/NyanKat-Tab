@@ -340,11 +340,13 @@
     sendResponse({ ok: openSettings() });
   });
 
+  let settingsChanged = false;
   chrome.storage.sync.get({ [SETTING]: false }, values => {
-    enabled = values[SETTING] === true;
+    if (!settingsChanged) enabled = values[SETTING] === true;
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "sync" || !changes[SETTING]) return;
+    settingsChanged = true;
     enabled = changes[SETTING].newValue === true;
     if (!enabled) destroyHost();
   });

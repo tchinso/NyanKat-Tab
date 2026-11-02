@@ -6,7 +6,9 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-function harness(trigger = "longClick") {
+function harness(trigger = "longClick", deferSettings = false) {
+  let initialSettings;
+  let settingsListener;
   let now = 0;
   let nextTimer = 0;
   const timers = new Map();
@@ -33,8 +35,11 @@ function harness(trigger = "longClick") {
   const chrome = {
     runtime: { sendMessage(message, callback) { requests.push(message); callback({ ok: true }); } },
     storage: {
-      sync: { get(defaults, callback) { callback({ linkPreviewSettings: { ...defaults.linkPreviewSettings, trigger } }); } },
-      onChanged: { addListener() {} }
+      sync: { get(defaults, callback) {
+        initialSettings = () => callback({ linkPreviewSettings: { ...defaults.linkPreviewSettings, trigger } });
+        if (!deferSettings) initialSettings();
+      } },
+      onChanged: { addListener(callback) { settingsListener = callback; } }
     }
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "link-preview.js"), "utf8"), {
@@ -57,8 +62,19 @@ function harness(trigger = "longClick") {
       if (timer.due <= now) { timers.delete(id); timer.fn(); }
     }
   }
-  return { emit, advance, requests, blur: () => windowListeners.get("blur")() };
+  return { emit, advance, requests, blur: () => windowListeners.get("blur")(),
+    initialSettings: () => initialSettings(),
+    changeSettings: value => settingsListener({ linkPreviewSettings: { newValue: value } }, "sync") };
 }
+
+test("late startup settings cannot re-enable a disabled preview", () => {
+  const h = harness("longClick", true);
+  h.changeSettings({ enabled: false });
+  h.initialSettings();
+  h.emit("pointerdown", { buttons: 1 });
+  h.advance(500);
+  assert.equal(h.requests.length, 0);
+});
 
 test("holding a link after the preview opens still suppresses release navigation", () => {
   const h = harness();

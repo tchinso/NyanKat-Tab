@@ -62,6 +62,10 @@ function harness(options = {}) {
         },
         prepare(config = {}) {
           this.prepareCalls.push({ ...config, inClick: activation.inClick });
+          if (options.prepareDelay) return options.prepareDelay.then(() => {
+            this.report("download-required", { message: "번역 모델 준비 버튼을 눌러 주세요." });
+            throw Object.assign(new Error("download-required"), { code: "download-required" });
+          });
           if (options.prepareError) {
             this.report("error", { code: options.prepareError, message: "준비 실패" });
             return Promise.reject(Object.assign(new Error(options.prepareError), { code: options.prepareError }));
@@ -96,6 +100,7 @@ function harness(options = {}) {
           queue = result.catch(() => {});
           return result;
         },
+        async lookup(text) { return cache.has(text) ? cache.get(text) : options.persisted?.[text] ?? null; },
         ...(options.cacheAware ? { cached(text) { return cache.has(text) ? cache.get(text) : null; } } : {}),
         destroy() { this.destroyCalls += 1; this.destroyed = true; }
       };
@@ -455,6 +460,27 @@ test("language configuration cancels that client's prior cue and scopes preparat
   assert.equal(japaneseStatus.every(message => message.clientId === "first"), true);
 });
 
+test("switching the last client releases its previous language model and stale work", async () => {
+  const h = harness();
+  h.configure("client", "en");
+  h.translate("client", "old", "Hello", "en");
+  await settle();
+  const english = h.sessions[0];
+  h.configure("client", "ja");
+  assert.equal(english.destroyCalls, 1);
+  assert.equal(english.operations[0].signal.aborted, true);
+  assert.equal(h.container.children.length, 1);
+  english.operations[0].resolve("늦은 결과");
+  await settle();
+  assert.deepEqual(h.results(), []);
+  h.configure("client", "en");
+  assert.equal(h.sessions[1].destroyCalls, 1);
+  assert.equal(h.sessions.length, 3, "returning to a released language creates a fresh session");
+  h.port.send({ type: "release", clientId: "client" });
+  assert.equal(h.sessions.every(session => session.destroyCalls === 1), true);
+  assert.equal(h.container.children.length, 0);
+});
+
 test("preparation errors remain scoped statuses and an explicit retry resumes the same pending request", async () => {
   const options = { prepareError: "api-unavailable" };
   const h = harness(options);
@@ -476,13 +502,15 @@ test("preparation errors remain scoped statuses and an explicit retry resumes th
 test("dismissing a download prompt hides it until a new language selection needs attention", async () => {
   const h = harness({ downloadable: true });
   h.configure("client", "en");
+  h.translate("client", "english", "Hello", "en");
   await settle();
-  assert.deepEqual(h.messages.at(-1), { type: "visibility", visible: true });
+  assert.deepEqual(h.messages.filter(message => message.type === "visibility").at(-1), { type: "visibility", visible: true });
   h.dismiss.click();
   assert.deepEqual(h.messages.at(-1), { type: "visibility", visible: false });
   h.configure("client", "ja");
+  h.translate("client", "japanese", "こんにちは", "ja");
   await settle();
-  assert.deepEqual(h.messages.at(-1), { type: "visibility", visible: true });
+  assert.deepEqual(h.messages.filter(message => message.type === "visibility").at(-1), { type: "visibility", visible: true });
 });
 
 test("one 20-second status timer keeps all clients alive without restarting or cancelling their jobs", async () => {
@@ -566,4 +594,27 @@ test("document departure or port disconnection aborts all jobs and destroys lang
     await settle();
     assert.deepEqual(h.results(), []);
   }
+});
+
+test("persisted translations are displayed without preparing an unavailable model", async () => {
+  const h = harness({ prepareError: "api-unavailable", persisted: { Hello: "이전 번역" } });
+  h.translate("client", "cached", "Hello");
+  await settle();
+  assert.equal(h.sessions[0].prepareCalls.length, 0);
+  assert.equal(h.sessions[0].operations.length, 0);
+  assert.deepEqual(h.results(), [{ type: "done", clientId: "client", requestId: "cached", text: "이전 번역" }]);
+});
+
+test("configure never races cached results with a delayed model availability check", async () => {
+  const gate = deferred();
+  const h = harness({ prepareDelay: gate.promise, persisted: { Hello: "이전 번역" } });
+  h.configure("client");
+  h.translate("client", "cached", "Hello");
+  await settle();
+  assert.deepEqual(h.results(), [{ type: "done", clientId: "client", requestId: "cached", text: "이전 번역" }]);
+  gate.resolve();
+  await settle();
+  assert.equal(h.sessions[0].prepareCalls.length, 0);
+  assert.equal(h.messages.some(message => message.status?.state === "download-required"), false);
+  assert.equal(h.container.children[0].hidden, true);
 });

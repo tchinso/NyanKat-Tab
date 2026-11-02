@@ -52,6 +52,9 @@ function loadScript(filename) {
 function ensureSubtitleScripts() {
   if (!subtitleScriptsReady) {
     subtitleScriptsReady = (async () => {
+      await loadScript("subtitle-parser.js");
+      await loadScript("subtitle-context.js");
+      await loadScript("subtitle-archive.js");
       await loadScript("subtitle-translation.js");
       await loadScript("subtitle-popup.js");
     })().catch((error) => {

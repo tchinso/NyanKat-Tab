@@ -11,6 +11,24 @@ const window = {};
 vm.runInNewContext(source, { window });
 const parser = window.NyanKatSubtitleParser;
 
+test("MicroDVD uses embedded FPS, strips formatting and preserves line breaks", () => {
+  assert.equal(parser.guessFormatByFilename("episode.SUB"), "sub");
+  const cues = parser.parse("sub", "{1}{1}25\n{25}{75}{y:i}첫 줄|둘째 줄\n{80}{70}invalid", { fps: 30 });
+  assert.equal(cues.length, 1);
+  assert.equal(cues[0].start, 1);
+  assert.equal(cues[0].end, 3);
+  assert.equal(cues[0].text, "첫 줄\n둘째 줄");
+  assert.equal(parser.parse("auto", "{0}{0}23.976\n{24}{48}Hello")[0].start, 24 / 23.976);
+});
+
+test("MicroDVD requires explicit FPS without a header and rejects image SUB", () => {
+  assert.throws(() => parser.parse("sub", "{24}{48}Hello"), { code: "microdvd_fps_required" });
+  assert.equal(parser.parse("sub", "{24}{48}Hello", { fps: 24 })[0].end, 2);
+  assert.throws(() => parser.parse("sub", "\0\0\x01\xba"), { code: "unsupported_sub" });
+  assert.throws(() => parser.parse("sub", "not a text subtitle"), { code: "unsupported_sub" });
+  assert.throws(() => parser.parse("sub", "{24}{48}Hello", { fps: 999 }), { code: "microdvd_fps_required" });
+});
+
 test("WebVTT parses cue IDs and settings while skipping non-cue blocks", () => {
   const vtt = `\uFEFFWEBVTT - sample
 

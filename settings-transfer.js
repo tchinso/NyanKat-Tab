@@ -3,7 +3,7 @@
 (() => {
   const FORMAT = "nyankatx3-tab-settings";
   const SCHEMA_VERSION = 1;
-  const MAX_FILE_BYTES = 1024 * 1024;
+  const MAX_FILE_BYTES = 24 * 1024 * 1024;
   const DEFAULT_SYNC = {
     disableNewTabFavoritesRedirect: false,
     sendZeroOnYouTube: true,
@@ -170,9 +170,28 @@
     }
     if (own(input, "subtitlePostprocessDictionary")) {
       const dictionary = input.subtitlePostprocessDictionary;
-      if (typeof dictionary !== "string" || dictionary.length > window.NyanKatSubtitlePostprocess.MAX_DICTIONARY_CHARS ||
+      if (typeof dictionary !== "string" ||
           window.NyanKatSubtitlePostprocess.compile(dictionary).errors.length) invalid("자막 치환 목록");
       result.subtitlePostprocessDictionary = dictionary;
+    }
+    if (own(input, "subtitleSourceGlossary")) {
+      const glossary = input.subtitleSourceGlossary;
+      if (typeof glossary !== "string" || window.NyanKatSubtitleGlossary.compile(glossary).errors.length) invalid("전처리 사전");
+      result.subtitleSourceGlossary = glossary;
+    }
+    if (!window.NyanKatSubtitleDictionary.validateSize(
+      result.subtitleSourceGlossary || "", result.subtitlePostprocessDictionary || ""
+    )) throw new Error("전처리·후처리 사전은 합계 10 KiB 이하여야 합니다.");
+    if (own(input, "subtitleHideSyncControls")) {
+      result.subtitleHideSyncControls = checkBoolean(input.subtitleHideSyncControls, "자막 싱크 메뉴 숨김");
+    }
+    if (own(input, "subtitleDisplayOptions")) {
+      if (!record(input.subtitleDisplayOptions)) invalid("자막 표시 설정");
+      result.subtitleDisplayOptions = {};
+      for (const key of ["showOriginal", "hideSoundEffects", "hideSpeakers"]) {
+        result.subtitleDisplayOptions[key] = own(input.subtitleDisplayOptions, key)
+          ? checkBoolean(input.subtitleDisplayOptions[key], key) : false;
+      }
     }
     return result;
   }
@@ -197,7 +216,7 @@
       chrome.storage.sync.get(DEFAULT_SYNC),
       chrome.storage.local.get([
         "subtitleStyle", "subtitleFont", "subtitlePostprocessDictionary",
-        "subtitleStylePresets", "subtitleStylePresetId"
+        "subtitleStylePresets", "subtitleStylePresetId", "subtitleSourceGlossary", "subtitleDisplayOptions", "subtitleHideSyncControls"
       ])
     ]);
     const sync = readSync({ ...DEFAULT_SYNC, ...storedSync });
@@ -219,7 +238,10 @@
       subtitleStyle: style,
       subtitleStylePresets: presets,
       subtitleStylePresetId: selectedPresetId,
-      subtitlePostprocessDictionary: storedLocal.subtitlePostprocessDictionary ?? ""
+      subtitlePostprocessDictionary: storedLocal.subtitlePostprocessDictionary ?? "",
+      subtitleSourceGlossary: storedLocal.subtitleSourceGlossary ?? "",
+      subtitleDisplayOptions: storedLocal.subtitleDisplayOptions ?? {},
+      subtitleHideSyncControls: storedLocal.subtitleHideSyncControls ?? false
     });
     return {
       format: FORMAT,
@@ -269,6 +291,17 @@
     }
     if (own(settings.local, "subtitlePostprocessDictionary")) {
       localWrite.subtitlePostprocessDictionary = settings.local.subtitlePostprocessDictionary;
+    }
+    for (const key of ["subtitleSourceGlossary", "subtitleDisplayOptions", "subtitleHideSyncControls"]) {
+      if (own(settings.local, key)) localWrite[key] = settings.local[key];
+    }
+    // Partial backups must share the quota with the dictionary left on this PC.
+    if (own(localWrite, "subtitleSourceGlossary") || own(localWrite, "subtitlePostprocessDictionary")) {
+      const stored = await chrome.storage.local.get(["subtitleSourceGlossary", "subtitlePostprocessDictionary"]);
+      const merged = { ...stored, ...localWrite };
+      if (!window.NyanKatSubtitleDictionary.validateSize(
+        merged.subtitleSourceGlossary || "", merged.subtitlePostprocessDictionary || ""
+      )) throw new Error("전처리·후처리 사전은 합계 10 KiB 이하여야 합니다.");
     }
     const syncKeys = Object.keys(settings.sync);
     const hasLocalWrite = Object.keys(localWrite).length > 0;
@@ -346,7 +379,7 @@
     setBusy(true);
     status.textContent = "설정을 불러오는 중…";
     try {
-      if (file.size > MAX_FILE_BYTES) throw new Error("설정 파일은 1MB 이하여야 합니다.");
+      if (file.size > MAX_FILE_BYTES) throw new Error("설정 파일은 24 MiB 이하여야 합니다.");
       const settings = parseImport(await file.text());
       await applyImport(settings);
       status.textContent = "설정을 불러왔습니다. 화면을 새로고침합니다.";

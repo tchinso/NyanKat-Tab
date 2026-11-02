@@ -9,7 +9,9 @@ const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "..", "youtube-zero.js"), "utf8");
 const WATCH_URL = "https://www.youtube.com/watch?v=same-video";
 
-function harness(initialUrl = WATCH_URL) {
+function harness(initialUrl = WATCH_URL, deferSettings = false) {
+  let initialSettings;
+  let settingsListener;
   let now = 0;
   let nextTimerId = 1;
   let video = null;
@@ -44,8 +46,11 @@ function harness(initialUrl = WATCH_URL) {
   };
   const chrome = {
     storage: {
-      sync: { get(_defaults, callback) { callback({ sendZeroOnYouTube: true }); } },
-      onChanged: { addListener() {} }
+      sync: { get(_defaults, callback) {
+        initialSettings = () => callback({ sendZeroOnYouTube: true });
+        if (!deferSettings) initialSettings();
+      } },
+      onChanged: { addListener(callback) { settingsListener = callback; } }
     }
   };
   class FakeKeyboardEvent {
@@ -65,6 +70,8 @@ function harness(initialUrl = WATCH_URL) {
 
   return {
     events,
+    initialSettings: () => initialSettings(),
+    changeSettings: value => settingsListener({ sendZeroOnYouTube: { newValue: value } }, "sync"),
     setVideo(currentTime, readyState = 2) {
       const listeners = new Map();
       video = {
@@ -115,6 +122,18 @@ test("returning to the same video after leaving watch sends zero again", async (
 
   assert.equal(video.currentTime, 0);
   assert.ok(page.events.length > firstEventCount);
+});
+
+test("pending startup settings cannot reset a video before loading or after disabling", async () => {
+  const page = harness(WATCH_URL, true);
+  const video = page.setVideo(40);
+  await page.advance(650);
+  assert.equal(page.events.length, 0);
+  page.changeSettings(false);
+  page.initialSettings();
+  await page.advance(650);
+  assert.equal(video.currentTime, 40);
+  assert.equal(page.events.length, 0);
 });
 
 test("missing video is retried after discovery times out", async () => {

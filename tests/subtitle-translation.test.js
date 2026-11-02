@@ -43,7 +43,9 @@ function harness(options = {}) {
       }
     }
   };
-  vm.runInNewContext(source, { window: environment, Promise, Map, Set, Object, String, Number, Error, Symbol });
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "subtitle-dictionary.js"), "utf8"), { window: environment });
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "subtitle-glossary.js"), "utf8"), { window: environment });
+  vm.runInNewContext(source, { window: environment, chrome: options.chrome, Promise, Map, Set, Object, String, Number, Error, Symbol });
   const api = environment.NyanKatSubtitleTranslation;
   const session = api.createSession({ sourceLanguage: options.language || "en", onStatus: status => statuses.push(status), ...options.session });
   return { api, session, environment, calls, statuses };
@@ -233,4 +235,145 @@ test("destroy releases the model and cache and rejects subsequent work", async (
   assert.equal(session.cached("Hello"), null);
   await assert.rejects(session.translateLines("Hello"), error => error.code === "destroyed");
   assert.equal(session.status.state, "destroyed");
+});
+
+function extensionCache() {
+  const data = new Map();
+  const listeners = new Set();
+  const state = { glossary: "", epoch: "first" };
+  const changed = changes => { for (const listener of listeners) listener(changes, "local"); };
+  const chrome = {
+    storage: {
+      local: { async get() { return { subtitleSourceGlossary: state.glossary }; } },
+      onChanged: { addListener(value) { listeners.add(value); }, removeListener(value) { listeners.delete(value); } }
+    },
+    runtime: { async sendMessage(message) {
+      const key = JSON.stringify([message.sourceLanguage, message.glossary, message.text]);
+      if (message.type.endsWith("GET")) return { ok: true, epoch: state.epoch, text: data.get(key) ?? null };
+      if (message.type.endsWith("PUT") && message.epoch === state.epoch) data.set(key, message.result);
+      return { ok: true };
+    } }
+  };
+  return { chrome, data, listeners,
+    glossary(value) { state.glossary = value; changed({ subtitleSourceGlossary: { newValue: value } }); },
+    clear() { data.clear(); state.epoch += "next"; changed({ subtitleTranslationCacheEpoch: { newValue: state.epoch } }); }
+  };
+}
+
+test("source glossary transforms only translator input and caches raw translations under original content", async () => {
+  const saved = extensionCache();
+  saved.glossary("レム=렘");
+  const h = harness({ language: "ja", chrome: saved.chrome });
+  assert.equal(await h.session.translateLines("レム、こんにちは"), "번역:렘、こんにちは");
+  assert.equal(h.calls.lines[0].line, "렘、こんにちは");
+  assert.equal(h.session.cached("レム、こんにちは"), "번역:렘、こんにちは");
+  h.session.destroy();
+  const reopened = harness({ language: "ja", chrome: saved.chrome, noApi: true });
+  assert.equal(await reopened.session.translateLines("レム、こんにちは"), "번역:렘、こんにちは");
+  assert.equal(reopened.calls.create.length, 0);
+  assert.equal(reopened.session.status.state, "ready");
+  reopened.session.destroy();
+  assert.equal(saved.listeners.size, 0);
+});
+
+test("changed glossary never reuses translations for old names and clearing invalidates live memory", async () => {
+  const saved = extensionCache();
+  saved.glossary("Rem=렘");
+  const h = harness({ chrome: saved.chrome });
+  assert.equal(await h.session.translateLines("Rem"), "번역:렘");
+  saved.glossary("Rem=램");
+  assert.equal(h.session.cached("Rem"), null);
+  assert.equal(await h.session.translateLines("Rem"), "번역:램");
+  assert.equal(h.calls.lines.length, 2);
+  saved.clear();
+  assert.equal(h.session.cached("Rem"), null);
+  assert.equal(await h.session.translateLines("Rem"), "번역:램");
+  assert.equal(h.calls.lines.length, 3);
+  h.session.destroy();
+});
+
+test("cache clearing during streaming does not repopulate memory or persisted storage with in-flight results", async () => {
+  const saved = extensionCache();
+  let streamController;
+  const h = harness({ chrome: saved.chrome, stream() {
+    return new ReadableStream({ start(controller) { streamController = controller; } });
+  } });
+  const pending = h.session.translateLines("in-flight");
+  while (!streamController) await new Promise(resolve => setImmediate(resolve));
+  saved.clear();
+  streamController.enqueue("완료");
+  streamController.close();
+  assert.equal(await pending, "완료");
+  assert.equal(h.session.cached("in-flight"), null);
+  assert.equal(saved.data.size, 0);
+  h.session.destroy();
+});
+
+test("a delayed settings read cannot overwrite a newer glossary change event", async () => {
+  const saved = extensionCache();
+  saved.glossary("Rem=렘");
+  let finishRead;
+  saved.chrome.storage.local.get = () => new Promise(resolve => { finishRead = resolve; });
+  const h = harness({ chrome: saved.chrome });
+  const lookup = h.session.lookup("Rem");
+  while (!finishRead) await new Promise(resolve => setImmediate(resolve));
+  saved.glossary("Rem=램");
+  finishRead({ subtitleSourceGlossary: "Rem=렘" });
+  await lookup;
+  saved.chrome.storage.local.get = async () => { throw new Error("offline settings"); };
+  assert.equal(await h.session.translateLines("Rem"), "번역:램");
+  h.session.destroy();
+});
+
+test("large unchanged glossaries are read and compiled once across concurrent and repeated lookups", async () => {
+  const saved = extensionCache();
+  const dictionary = "#" + "x".repeat(9000) + "\nRem=렘";
+  saved.glossary(dictionary);
+  let reads = 0, compiles = 0;
+  const get = saved.chrome.storage.local.get;
+  saved.chrome.storage.local.get = async () => { reads++; return get(); };
+  const h = harness({ chrome: saved.chrome });
+  const compile = h.environment.NyanKatSubtitleGlossary.compile;
+  h.environment.NyanKatSubtitleGlossary.compile = value => { compiles++; return compile(value); };
+  await Promise.all([h.session.lookup("Rem"), h.session.lookup("Hello")]);
+  await h.session.translateLines("Rem");
+  await h.session.lookup("Rem");
+  saved.glossary(dictionary);
+  await h.session.lookup("Hello");
+  assert.equal(reads, 1);
+  assert.equal(compiles, 1);
+  assert.equal(h.session.cached("Rem"), "번역:렘");
+  saved.glossary(dictionary.replace("Rem=렘", "Rem=램"));
+  assert.equal(await h.session.translateLines("Rem"), "번역:램");
+  assert.equal(reads, 1);
+  assert.equal(compiles, 2);
+  h.session.destroy();
+});
+
+test("an unchanged storage event still supersedes a stale initial read", async () => {
+  const saved = extensionCache();
+  let finishRead;
+  saved.chrome.storage.local.get = () => new Promise(resolve => { finishRead = resolve; });
+  const h = harness({ chrome: saved.chrome });
+  const pending = h.session.lookup("Rem");
+  while (!finishRead) await new Promise(resolve => setImmediate(resolve));
+  saved.glossary("");
+  finishRead({ subtitleSourceGlossary: "Rem=예전 이름" });
+  await pending;
+  assert.equal(await h.session.translateLines("Rem"), "번역:Rem");
+  h.session.destroy();
+});
+
+test("a failed initial glossary read retries on the next lookup", async () => {
+  const saved = extensionCache();
+  let reads = 0;
+  saved.chrome.storage.local.get = async () => {
+    if (++reads === 1) throw new Error("temporary storage failure");
+    return { subtitleSourceGlossary: "Rem=렘" };
+  };
+  const h = harness({ chrome: saved.chrome });
+  await h.session.lookup("Rem");
+  assert.equal(await h.session.translateLines("Rem"), "번역:렘");
+  assert.equal(reads, 2);
+  h.session.destroy();
 });

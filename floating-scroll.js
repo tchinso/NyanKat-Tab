@@ -1,5 +1,7 @@
 "use strict";
 
+(() => {
+
 const FLOATING_SCROLL_DEFAULT_SETTINGS = {
   floatingScrollSettings: {
     enabled: true,
@@ -762,3 +764,5 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
+
+})();

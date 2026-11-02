@@ -7,6 +7,13 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
+const subtitleScripts = ["subtitle-parser.js", "subtitle-context.js", "subtitle-archive.js", "subtitle-translation.js", "subtitle-popup.js"];
+async function loadSubtitleScripts(popup) {
+  for (const file of subtitleScripts) {
+    assert.equal(popup.scripts.at(-1), file);
+    await popup.loadNext();
+  }
+}
 
 function createPopup() {
   const scripts = [];
@@ -125,17 +132,14 @@ test("subtitle views load their scripts once in dependency order", async () => {
   popup.window.NyanKatPopup.showTab("subtitle");
   assertVisibleView(popup, "overlay");
   assert.deepEqual(popup.changingEvents, ["subtitle"]);
-  assert.deepEqual(popup.scripts, ["subtitle-translation.js"]);
-  await popup.loadNext();
-  assert.deepEqual(popup.scripts, ["subtitle-translation.js", "subtitle-popup.js"]);
-  await popup.loadNext();
+  await loadSubtitleScripts(popup);
   assert.deepEqual(popup.events, ["subtitle"]);
 
   popup.window.NyanKatPopup.showSubtitleSubtab("style");
   await popup.flush();
   assertVisibleView(popup, "style");
   assert.deepEqual(popup.events, ["subtitle", "style"]);
-  assert.equal(popup.scripts.length, 2);
+  assert.equal(popup.scripts.length, subtitleScripts.length);
 
   popup.window.NyanKatPopup.showSubtitleSubtab("extract");
   assertVisibleView(popup, "extract");
@@ -149,7 +153,7 @@ test("subtitle views load their scripts once in dependency order", async () => {
 
   popup.window.NyanKatPopup.showTab("subtitle", "overlay");
   await popup.flush();
-  assert.equal(popup.scripts.length, 4);
+  assert.equal(popup.scripts.length, subtitleScripts.length + 2);
   assert.deepEqual(popup.events, ["subtitle", "style", "download", "subtitle"]);
 });
 
@@ -157,27 +161,25 @@ test("opening extraction first prepares subtitle import before loading extractio
   const popup = createPopup();
   popup.window.NyanKatPopup.showTab("subtitle", "extract");
   assertVisibleView(popup, "extract");
-  assert.deepEqual(popup.scripts, ["subtitle-translation.js"]);
-  for (const file of ["subtitle-popup.js", "subtitle-extractor.js", "download-popup.js"]) {
-    await popup.loadNext();
+  await loadSubtitleScripts(popup);
+  for (const file of ["subtitle-extractor.js", "download-popup.js"]) {
     assert.equal(popup.scripts.at(-1), file);
+    await popup.loadNext();
   }
-  await popup.loadNext();
   assert.deepEqual(popup.events, ["download"]);
   popup.window.NyanKatPopup.showTab("basic");
   await popup.flush();
   popup.window.NyanKatPopup.showTab("subtitle");
   await popup.flush();
   assertVisibleView(popup, "extract");
-  assert.equal(popup.scripts.length, 4);
+  assert.equal(popup.scripts.length, subtitleScripts.length + 2);
   assert.deepEqual(popup.events, ["download", "basic", "download"]);
 });
 
 test("style selection is remembered and the legacy download alias opens extraction", async () => {
   const popup = createPopup();
   popup.window.NyanKatPopup.showTab("subtitle", "style");
-  await popup.loadNext();
-  await popup.loadNext();
+  await loadSubtitleScripts(popup);
   assertVisibleView(popup, "style");
   popup.window.NyanKatPopup.showTab("basic");
   await popup.flush();
@@ -199,8 +201,7 @@ test("a tab switched away during loading does not receive a stale shown event", 
   popup.window.NyanKatPopup.showTab("basic");
   assert.deepEqual(popup.changingEvents, ["subtitle", "basic"]);
   await popup.flush();
-  await popup.loadNext();
-  await popup.loadNext();
+  await loadSubtitleScripts(popup);
   assert.deepEqual(popup.events, ["basic"]);
   popup.window.NyanKatPopup.showTab("subtitle");
   await popup.flush();
@@ -213,8 +214,7 @@ test("switching between subtitle views during loading suppresses stale extractio
   popup.window.NyanKatPopup.showSubtitleSubtab("style");
   assertVisibleView(popup, "style");
   assert.deepEqual(popup.changingEvents, ["download", "style"]);
-  await popup.loadNext();
-  await popup.loadNext();
+  await loadSubtitleScripts(popup);
   assert.deepEqual(popup.events, ["style"]);
   await popup.loadNext();
   await popup.loadNext();
@@ -226,8 +226,7 @@ test("keyboard navigation stays within the active top-level or subtitle tab grou
   assert.equal(popup.elements.get("basicTab").emit("keydown", { key: "ArrowRight" }).prevented, true);
   assert.equal(popup.elements.get("subtitleTab").focused, true);
   assertVisibleView(popup, "overlay");
-  await popup.loadNext();
-  await popup.loadNext();
+  await loadSubtitleScripts(popup);
   popup.elements.get("overlaySubtitleTab").emit("keydown", { key: "ArrowRight" });
   await popup.flush();
   assert.equal(popup.elements.get("styleSubtitleTab").focused, true);
@@ -236,5 +235,5 @@ test("keyboard navigation stays within the active top-level or subtitle tab grou
   await popup.flush();
   assert.equal(popup.elements.get("basicTab").focused, true);
   assertVisibleView(popup, "basic");
-  assert.equal(popup.scripts.length, 2, "top-level navigation never enters extraction");
+  assert.equal(popup.scripts.length, subtitleScripts.length, "top-level navigation never enters extraction");
 });

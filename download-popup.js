@@ -5,12 +5,46 @@
   const empty = document.querySelector("#downloadEmpty");
   const status = document.querySelector("#downloadStatus");
   const refresh = document.querySelector("#refreshDownloads");
+  const remember = document.querySelector("#subtitleRememberTrack");
+  const contextTools = window.NyanKatSubtitleContext;
+  let pageContext = contextTools.searchContext();
+  let preferences = [];
+  let currentTracks = [];
+  let preferenceRevision = 0;
+  let preferenceWrite = Promise.resolve();
   let tabId = null;
   let timer = 0;
   let revision = 0;
   let listRevision = 0;
   let signature = "";
   let busy = false;
+  const preferencesReady = chrome.storage.local.get(["subtitleRememberTrack", "subtitleTrackPreferences"]).then(result => {
+    if (!preferenceRevision) remember.checked = result.subtitleRememberTrack === true;
+    preferences = contextTools.normalizePreferences(result.subtitleTrackPreferences);
+  }).catch(() => {});
+
+  function writePreferences(data) {
+    preferenceWrite = preferenceWrite.catch(() => {}).then(() => chrome.storage.local.set(data));
+    return preferenceWrite.catch(() => { status.textContent = "선호 트랙 설정을 저장하지 못했습니다."; });
+  }
+
+  async function rememberSelection(track, context) {
+    if (!remember.checked) return;
+    preferences = contextTools.rememberPreference(preferences, context, track);
+    await writePreferences({ subtitleTrackPreferences: preferences });
+    signature = "";
+  }
+
+  remember.addEventListener("change", () => {
+    preferenceRevision++;
+    void writePreferences({ subtitleRememberTrack: remember.checked });
+    signature = "";
+    render(currentTracks);
+  });
+  function updateContext(tab) {
+    pageContext = contextTools.searchContext({ title: tab.title, url: tab.url });
+    remember.disabled = !pageContext.workKey;
+  }
   const reasons = {
     stale_track: "페이지가 바뀌었습니다. 자막을 다시 검색하세요.",
     navigation_changed: "페이지가 바뀌어 다운로드를 중단했습니다.",
@@ -24,6 +58,16 @@
     save_cancelled: "파일 저장이 취소되었거나 실패했습니다."
   };
 
+  function withMetadata(primary, alternatives) {
+    const track = { ...primary };
+    for (const other of alternatives) {
+      if ((!track.label || track.label === "자막") && other.label && other.label !== "자막") track.label = other.label;
+      for (const key of ["language", "format", "role", "producer"]) if (!track[key] && other[key]) track[key] = other[key];
+      for (const key of ["forced", "default"]) if (typeof track[key] !== "boolean" && typeof other[key] === "boolean") track[key] = other[key];
+    }
+    return track;
+  }
+
   async function request(type, extra = {}) {
     try { return await chrome.runtime.sendMessage({ type, tabId, ...extra }); }
     catch { return null; }
@@ -33,11 +77,13 @@
     if (busy) return;
     busy = true;
     button.disabled = true;
+    const context = pageContext;
     status.textContent = "자막을 읽는 중… 스트리밍 자막은 모든 구간을 모은 뒤 저장합니다.";
     const response = await request("NYANKAT_DOWNLOAD_SAVE", { id: track.id });
     if (!response?.ok) {
       status.textContent = reasons[response?.reason] || "자막을 읽지 못했습니다. 사이트 자막을 다시 켜고 재검색해 보세요.";
     } else {
+      await rememberSelection(track, context);
       status.textContent = response.partial ? "현재 플레이어에 로드된 자막 구간을 저장했습니다. 전체 자막과 다를 수 있습니다." : "자막 파일 저장을 시작했습니다.";
     }
     busy = false;
@@ -48,6 +94,7 @@
     if (busy) return;
     busy = true;
     button.disabled = true;
+    const context = pageContext;
     status.textContent = "번역할 자막을 읽는 중… 스트리밍 자막은 모든 구간을 모은 뒤 불러옵니다.";
     try {
       const response = await request("NYANKAT_DOWNLOAD_PREPARE", { id: track.id });
@@ -74,12 +121,14 @@
         type: (format === "vtt" ? "text/vtt" : "text/plain") + ";charset=utf-8"
       });
       const imported = await window.NyanKatSubtitlePopup.importExtractedSubtitle({
-        text, format, filename, partial: response.partial === true, file
+        text, format, filename, partial: response.partial === true, file,
+        track: { ...track, language: response.language || track.language, label: response.label && response.label !== "자막" ? response.label : track.label }
       });
       if (imported === false || imported?.ok === false) throw new Error(imported?.reason || "import_failed");
+      await rememberSelection(track, context);
       status.textContent = response.partial
         ? "현재 플레이어에 로드된 자막 구간을 불러왔습니다. 전체 자막과 다를 수 있습니다."
-        : "자막 파일을 불러왔습니다. 자막 → 오버레이에서 영어 → 한국어 번역을 사용할 수 있습니다.";
+        : "자막 파일을 불러왔습니다. 자막 → 오버레이에서 원본 언어를 확인하고 적용하세요.";
     } catch (error) {
       status.textContent = reasons[error?.message] || "추출한 자막을 자막 파일로 불러오지 못했습니다. 다시 시도해 보세요.";
     } finally {
@@ -89,6 +138,7 @@
   }
 
   function render(tracks) {
+    currentTracks = tracks;
     const score = (track) => (track.verified ? 100 : 0) + (track.documentId ? 20 : 0) +
       (track.frameId > 0 ? 10 : 0) + (/html-track|native-cues|blob|page-fetch/.test(track.source) ? 15 : 0) +
       (track.label !== "자막" ? 5 : 0);
@@ -106,17 +156,19 @@
       const proxies = group.filter(item => item.proxy);
       if (!proxies.length) { candidates.push(...group.map(item => item.track)); continue; }
       const preferred = proxies.reduce((best, item) => score(item.track) > score(best.track) ? item : best).track;
-      candidates.push({ ...preferred, format: preferred.format || group.find(item => item.track.format)?.track.format || "" });
+      candidates.push(withMetadata(preferred, group.map(item => item.track)));
     }
     // Preserve existing same-URL deduplication across discovery frames.
     const unique = new Map();
     for (const track of candidates) {
       const key = JSON.stringify([track.url, track.representationId || ""]);
       const previous = unique.get(key);
-      if (!previous || score(track) > score(previous)) unique.set(key, track);
+      if (!previous) unique.set(key, track);
+      else unique.set(key, score(track) > score(previous) ? withMetadata(track, [previous]) : withMetadata(previous, [track]));
     }
-    const items = [...unique.values()];
-    const nextSignature = JSON.stringify(items);
+    const items = contextTools.sortTracks([...unique.values()]);
+    const recommended = remember.checked ? contextTools.recommendTrack(pageContext, items, preferences) : null;
+    const nextSignature = JSON.stringify([items, recommended?.id || ""]);
     if (signature === nextSignature) return;
     signature = nextSignature;
     list.replaceChildren();
@@ -132,6 +184,7 @@
       let host = "현재 플레이어";
       try { host = new URL(track.pageUrl || track.url).hostname || host; } catch { /* Virtual cues. */ }
       detail.textContent = [track.kind === "hls" ? "HLS → VTT" : track.kind === "dash" ? "DASH → VTT" : (track.format || "자막").toUpperCase(), host,
+        contextTools.classifyTrack(track).label, track.default ? "기본 트랙" : "", recommended === track ? "이 작품의 선호 트랙" : "",
         track.partial ? "로드된 구간만" : ""].filter(Boolean).join(" · ");
       const button = document.createElement("button");
       button.type = "button";
@@ -169,8 +222,11 @@
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (version !== revision) return;
       tabId = tabs[0]?.id ?? null;
+      updateContext(tabs[0] || {});
       signature = "";
       if (tabId === null) { status.textContent = "현재 탭을 찾지 못했습니다."; return; }
+      await preferencesReady;
+      if (version !== revision) return;
       if (rescan) await request("NYANKAT_DOWNLOAD_RESCAN");
       if (version !== revision) return;
       await update();

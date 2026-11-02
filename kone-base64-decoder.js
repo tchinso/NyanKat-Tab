@@ -1,5 +1,7 @@
 "use strict";
 
+(() => {
+
 const KONE_B64_DEFAULT_SETTINGS = {
   enableKoneBase64AutoDecode: true
 };
@@ -573,3 +575,5 @@ if (document.readyState === "loading") {
 } else {
   init();
 }
+
+})();

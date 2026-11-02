@@ -98,12 +98,97 @@
     const cacheLimit = Math.min(10000, Math.max(1, Number(options.cacheLimit) || 1500));
     const cache = new Map();
     const jobs = new Set();
+    const extension = typeof chrome !== "undefined" ? chrome : null;
+    let glossarySource = String(options.glossary || "");
+    let glossary = window.NyanKatSubtitleGlossary?.compile(glossarySource);
+    let glossaryRevision = 0;
+    let glossaryStorageRevision = 0;
+    let glossaryLoaded = false;
+    let glossaryLoading = null;
+    let cacheRevision = 0;
+    let cacheEpoch = null;
+    const glossaryFromStorage = options.glossary === undefined && extension?.storage?.local;
     let translator = null;
     let preparing = null;
     let prepareController = null;
     let destroyed = false;
     let queue = Promise.resolve();
     let status = { state: sourceLanguage === "ko" ? "disabled" : "idle", sourceLanguage, targetLanguage: "ko", progress: null, message: "" };
+
+    function setGlossary(value) {
+      const source = String(value || "");
+      if (source === glossarySource) return false;
+      const next = window.NyanKatSubtitleGlossary?.compile(source);
+      glossarySource = source;
+      if (next?.dictionary === glossary?.dictionary) return false;
+      glossary = next;
+      glossaryRevision += 1;
+      cache.clear();
+      return true;
+    }
+
+    function refreshGlossary() {
+      if (!glossaryFromStorage || glossaryLoaded) return;
+      if (glossaryLoading) return glossaryLoading;
+      const revision = glossaryStorageRevision;
+      // Read once per session and share concurrent lookups. The change listener
+      // keeps the snapshot fresh without copying/recompiling a large dictionary
+      // for every cue. A failed read remains retryable on the next lookup.
+      glossaryLoading = Promise.resolve().then(() => extension.storage.local.get("subtitleSourceGlossary"))
+        .then(saved => {
+          if (!destroyed && revision === glossaryStorageRevision) {
+            setGlossary(saved.subtitleSourceGlossary || "");
+            glossaryLoaded = true;
+          }
+        }).catch(() => { /* Translation remains available when settings cannot be read. */ })
+        .finally(() => { glossaryLoading = null; });
+      return glossaryLoading;
+    }
+
+    function storageChanged(changes, area) {
+      if (area !== "local" || destroyed) return;
+      if (glossaryFromStorage && changes.subtitleSourceGlossary) {
+        glossaryStorageRevision += 1;
+        glossaryLoaded = true;
+        if (setGlossary(changes.subtitleSourceGlossary.newValue || "")) cancel();
+      }
+      if (changes.subtitleTranslationCacheEpoch && changes.subtitleTranslationCacheEpoch.newValue !== cacheEpoch) {
+        cache.clear();
+        cacheRevision += 1;
+        cacheEpoch = changes.subtitleTranslationCacheEpoch.newValue || null;
+      }
+    }
+    extension?.storage?.onChanged?.addListener(storageChanged);
+
+    async function cacheRequest(type, text, extra = {}) {
+      if (!extension?.runtime?.sendMessage || sourceLanguage === "ko") return null;
+      try {
+        return await extension.runtime.sendMessage({ type: "NYANKAT_SUBTITLE_CACHE_" + type,
+          sourceLanguage, glossary: glossary?.dictionary || "", text, ...extra });
+      } catch { return null; }
+    }
+
+    async function lookup(text) {
+      await refreshGlossary();
+      if (destroyed) throw failure("destroyed");
+      const existing = cached(text);
+      if (existing !== null) {
+        if (sourceLanguage !== "ko") report("ready");
+        return existing;
+      }
+      const policy = glossaryRevision;
+      const revision = cacheRevision;
+      await Promise.all([...new Set(normalizedText(text).split("\n"))].map(async line => {
+        if (!line.trim() || cache.has(line)) return;
+        const result = await cacheRequest("GET", line);
+        if (destroyed || policy !== glossaryRevision || revision !== cacheRevision || !result?.ok) return;
+        cacheEpoch = result.epoch;
+        if (typeof result.text === "string") storeLine(line, result.text);
+      }));
+      const restored = cached(text);
+      if (restored !== null) report("ready");
+      return restored;
+    }
 
     function report(state, extra = {}) {
       if (destroyed && state !== "destroyed") return;
@@ -245,7 +330,11 @@
         return result;
       }
       assertActive(signal);
-      const stream = translator.translateStreaming(line, { signal });
+      const input = glossary ? glossary.apply(line) : line;
+      const policy = glossaryRevision;
+      const revision = cacheRevision;
+      const epoch = cacheEpoch;
+      const stream = translator.translateStreaming(input, { signal });
       // Standard ReadableStream supports getReader; the iterator fallback also
       // permits older conforming implementations and lightweight test providers.
       const iterator = typeof stream.getReader === "function" ? null : stream[Symbol.asyncIterator]();
@@ -261,10 +350,14 @@
           update(result);
         }
         assertActive(signal);
+        if (policy !== glossaryRevision) throw failure("aborted");
         completed = true;
         // Some expert models return no content for untranslatable punctuation.
-        result = result.trim() || line;
-        storeLine(line, result);
+        result = result.trim() || input;
+        if (revision === cacheRevision) {
+          storeLine(line, result);
+          if (epoch !== null) void cacheRequest("PUT", line, { result, epoch });
+        }
         return result;
       } finally {
         if (!completed && typeof reader.cancel === "function") {
@@ -287,9 +380,11 @@
       const run = async () => {
         assertActive(signal);
         if (destroyed) throw failure("destroyed");
-        const existing = cached(normalized);
+        const existing = await lookup(normalized);
+        assertActive(signal);
         if (existing !== null) {
           if (settings.onUpdate) settings.onUpdate(existing, { lineIndex: -1, done: true });
+          if (sourceLanguage !== "ko") report("ready");
           return existing;
         }
         await prepare({ signal });
@@ -332,6 +427,7 @@
       if (destroyed) return;
       cancel();
       destroyed = true;
+      extension?.storage?.onChanged?.removeListener(storageChanged);
       if (translator) translator.destroy();
       translator = null;
       cache.clear();
@@ -341,7 +437,7 @@
     return {
       get sourceLanguage() { return sourceLanguage; },
       get status() { return { ...status }; },
-      availability, prepare, translateLines, cached, cancel, destroy
+      availability, prepare, translateLines, cached, lookup, cancel, destroy
     };
   }
 

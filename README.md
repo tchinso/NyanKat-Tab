@@ -1,6 +1,6 @@
 # NyanKatX3 Tab
 
-Current release: **1.6.0**.
+Current release: **1.6.1**.
 
 Chrome MV3 extension for:
 
@@ -72,7 +72,7 @@ In **기본**, open **링크 미리보기 설정** below the kio.ac download-sta
 
 In **기본**, **드래그 번역 켜기** enables translation and opens a compact setup popup inside the current HTTP(S) web page. Drag its top handle to uncover page content, and scroll inside the popup for the model controls. Choose a source language and click **번역 준비** to prepare both browser models in one action. Selecting text with a mouse drag opens a Korean translation tooltip when the drag ends. If a newly detected language needs a model, the tooltip offers a direct preparation button. Both APIs run in a browser extension frame inside the tab; selected text is not sent to Google Translate. API availability depends on the browser's model and policy state, which the setup popup reports.
 
-In **기본**, **설정 내보내기** saves the persistent options, subtitle style, and postprocessing dictionary as JSON; **설정 불러오기** restores them. A PC-installed subtitle font is omitted from the file, and importing keeps the receiving PC's current font choice. Built-in extension font choices can be transferred.
+In **기본**, **설정 내보내기** saves the persistent options, subtitle style, display options, source glossary, and postprocessing dictionary as JSON; **설정 불러오기** restores them. Translation cache and work-specific track history stay on this device. A PC-installed subtitle font is omitted from the file, and importing keeps the receiving PC's current font choice. Built-in extension font choices can be transferred.
 
 ## Soft-subtitle downloads
 
@@ -131,7 +131,15 @@ The native [Chrome Translator API](https://developer.chrome.com/docs/ai/translat
 
 For a translated language, **후처리 설정** opens a saved dictionary. Enter one `출력=후처리` rule per line, such as `플라스틱 뚜껑=플라흐타`. All literal matches in streaming/final translated text are replaced. Longer overlapping phrases take priority, and replacement text is not replaced again in the same pass. Dictionary edits also update the currently displayed translation. Original subtitles in **한국어(번역하지 않음)** are unaffected.
 
-In **자막 → 추출·검색**, **번역** reads the selected subtitle into a local in-memory file, selects it under **자막 파일**, switches to **오버레이**, and sets **언어** to English. Choose the correct source language if needed, then press **자막 적용**. Formats unsupported by the overlay are converted to VTT with their timing preserved. **다운로드** continues to save the original subtitle separately.
+In **자막 → 추출·검색**, **번역** reads the selected subtitle into a local in-memory file and opens **오버레이**. The track's language code/label takes priority; without metadata, several dialogue lines are sampled conservatively. Japanese selects Japanese, Korean selects **한국어(번역하지 않음)**, and ambiguous text requires choosing a language before applying. Latin letters alone never imply English. Formats unsupported by the overlay are converted to VTT with their timing preserved. **다운로드** saves the original subtitle separately.
+
+Tracks identify **전체 대사**, **표지판·노래**, and **강제 표시** when the metadata is explicit. Full dialogue moves ahead of partial-purpose tracks in the same language, while all choices remain available. **작품별로 선택한 언어·트랙 기억하기** is opt-in: up to 100 work profiles retain language, purpose and stable producer/label information, never expiring subtitle URLs. Only a unique matching candidate on a page with clear work/episode evidence is recommended; it is not applied automatically. Search suggestions separate title, season and episode from the page title, ignore opaque query IDs such as `?ep=12345`, and remain editable before Google/Naver search.
+
+**번역 아래 원문 함께 보기** adds the original text below Korean for both file subtitles and Japanese speech. It is off by default and makes no extra translation request. Independent **효과음 설명 숨기기** and **화자명 숨기기** options filter only displayed text; ambiguous parenthetical dialogue and short exclamations are retained. Source files, downloads and translation input remain intact.
+
+**번역 전처리 설정** accepts one `source=Korean` proper noun per line. Longest literal terms win without cascading replacement, and Latin terms respect word boundaries. The glossary is applied before translation; the existing **번역 후처리 설정** dictionary still applies afterward. Completed translations persist locally by exact cue content, language pair, canonical glossary and engine version. The dictionaries share one manager with a combined 10 KiB (10,240 bytes) UTF-8 budget and a **저장된 사전 삭제** button. The cache separately holds at most 4,000 lines / 3 MB (3,000,000 bytes), restores cached lines before model setup, and can be deleted from **번역 저장 관리**. Postprocessing edits do not invalidate raw cached translations; glossary changes do.
+
+The file picker also opens ZIP archives and text MicroDVD `.sub` files. ZIP shows subtitle filenames and uncompressed sizes before extracting the selected entry. UTF-8 flags/Unicode path metadata and legacy CP949 names are supported. Limits are 32 MiB per ZIP, 1,024 entries, 64 MiB declared expanded total and 8 MiB per selected subtitle; encrypted, split and ZIP64 archives are not supported. Size and CRC checks run during extraction. MicroDVD uses embedded FPS when present, otherwise requires an explicit FPS. Image-based `.sub` subtitles are rejected.
 
 Floating scroll defaults are **🔽 7.5**, **⏬ 45**, and **⬇️ 95%** of the scrollable distance. Previously saved custom speeds are preserved.
 
@@ -142,6 +150,10 @@ Auto-scroll uses immediate per-frame movement, including inside scrollable panel
 The **자막** tab contains **오버레이**, **스타일**, and **추출·검색** subtabs. **스타일** saves all display options automatically in extension local storage, even without a selected video. The saved style is restored when reopening the popup and applies to subsequent subtitles. Existing saved font selections are migrated. File selection, subtitle timing offsets, and subtitle rates remain specific to the current subtitle/video.
 
 In **오버레이**, positive `offsetMs` delays subtitles and negative values advance them. The default `syncRate` is `1.000000`, and subtitle time is `(video.currentTime - offsetMs / 1000) * syncRate`. The rate input steps by `0.00001`; adjustment buttons change it by `±0.0001` or `±0.001`, and **초기화** restores `1.000000`. FPS presets are `0.95905`, `0.96000`, `0.99900`, `1.00100`, `1.04167`, and `1.04271`.
+
+With a file subtitle applied, the video's **싱크** control works even after closing the popup: advance/delay by 0.2 seconds and see the cumulative offset briefly. **두 지점 보정** lets you choose an early dialogue cue and capture the actual video time, then repeat for a later cue. It previews the calculated offset/rate before applying. This corrects gradual drift, not abrupt changes caused by advertising or different edits. Controls belong to the selected video and install no global keyboard shortcuts.
+
+Site-player container fullscreen retains these controls. Chrome's native fullscreen of the video element makes outside controls inert: subtitles remain visible, while sync controls and translation-model preparation resume after leaving fullscreen.
 
 The font selector includes **깔끔한** and **귀여운** groups with 11 supplied fonts, alongside **PC에 설치된 글꼴**. Eight font files ship with the extension; Binggrae, Moneygraphy Rounded, and Tmoney RoundWind load as web fonts and need an internet connection. See [font sources and licenses](fonts/README.md).
 
@@ -154,3 +166,9 @@ Style controls include font size, letter spacing, line height, vertical position
 ## Icons
 
 The extension uses PNG files extracted directly from the supplied `.ico` icon files so Chrome UI and Chrome Web Store rendering do not fall back to the default extension icon.
+
+### 1.6.1 settings and reliability
+
+Translation dictionary settings, speaker/effect filters and bilingual display controls are hidden for Korean source subtitles; Korean display bypasses those filters. The sync settings can permanently hide the in-video sync menu. Its **이번 화 싱크 버튼 숨기기** action lasts until the next media source or subtitle load. Online subtitle search uses the dedicated search site only.
+
+Release review fixed shared globals between auto-scroll and the KONE decoder, stale initial settings in link previews/hover translation/YouTube, and unused translation sessions after language changes. Large dictionaries use literal trie matching and are compiled only when their contents change.

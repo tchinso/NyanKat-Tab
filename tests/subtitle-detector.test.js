@@ -114,6 +114,21 @@ function domTrack(url, language = "en", label = "English") {
   return { src: url, kind: "subtitles", srclang: language, label, closest() { return null; }, getAttribute(name) { return this[name] || ""; } };
 }
 
+test("manifest forced/default metadata crosses both worlds and survives a body response", async () => {
+  const manifest = '#EXTM3U\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",FORCED=YES,DEFAULT=NO,URI="forced.m3u8"';
+  const environment = createEnvironment({ fetchText: url => url.endsWith("master.m3u8") ? manifest : VTT });
+  await environment.context.fetch("https://cdn.example/master.m3u8");
+  await environment.settle();
+  environment.flushTimers();
+  const track = environment.latest().tracks.find(track => track.url.endsWith("forced.m3u8"));
+  assert.equal(track.forced, true);
+  assert.equal(track.default, false);
+  await environment.context.fetch(track.url);
+  await environment.settle();
+  environment.flushTimers();
+  assert.equal(environment.latest().tracks.find(item => item.url === track.url).forced, true);
+});
+
 test("Cloudflare challenge documents keep native fetch and initiate no probe requests", async () => {
   for (const pageUrl of [
     "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/",
@@ -274,6 +289,22 @@ test("MessagePort configs and inline ASS text retain normal transfer behavior", 
   const inline = environment.latest().tracks.find(track => track.url.startsWith("nyankat-cues:"));
   assert.ok(inline);
   assert.equal(inline.format, "ass");
+  assert.equal((await environment.read(inline.url)).text, ASS);
+});
+
+test("inline captions retain sibling source language and rendition metadata", async () => {
+  const environment = createEnvironment();
+  const port = new environment.context.MessagePort();
+  const options = { subContent: ASS, label: "Full", srclang: "ja", producer: "Team A", forced: false, default: true };
+  Object.defineProperty(options, "language", { get() { throw new Error("must not invoke page getters"); }, enumerable: true });
+  port.postMessage({ options });
+  await environment.settle();
+  environment.flushTimers();
+  const inline = environment.latest().tracks.find(track => track.url.startsWith("nyankat-cues:"));
+  assert.equal(inline.language, "ja");
+  assert.equal(inline.producer, "Team A");
+  assert.equal(inline.forced, false);
+  assert.equal(inline.default, true);
   assert.equal((await environment.read(inline.url)).text, ASS);
 });
 

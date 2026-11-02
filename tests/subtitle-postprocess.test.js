@@ -7,8 +7,9 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const window = {};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "subtitle-dictionary.js"), "utf8"), { window });
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "subtitle-postprocess.js"), "utf8"), { window });
-const { compile, MAX_DICTIONARY_CHARS, MAX_ENTRIES } = window.NyanKatSubtitlePostprocess;
+const { compile, MAX_BYTES } = window.NyanKatSubtitlePostprocess;
 
 test("applies Korean, Unicode, emoji, and punctuation rules to every occurrence", () => {
   const dictionary = compile("고양이=냥이\n🐈=냥\n猫=고양이\nhello!=안녕!");
@@ -68,22 +69,18 @@ test("an empty dictionary preserves text including markup and line breaks", () =
   }
 });
 
-test("character bound preserves complete rules and rejects a truncated final rule", () => {
-  const source = "first=one\n" + "x".repeat(MAX_DICTIONARY_CHARS) + "=partial\nlast=two";
-  const dictionary = compile(source);
-  assert.equal(dictionary.count, 1);
-  assert.equal(dictionary.apply("first last"), "one last");
-  assert(dictionary.errors.some(error => error.reason === "too-large"));
-  assert.equal(compile("x".repeat(MAX_DICTIONARY_CHARS) + "=bad").count, 0);
+test("byte budget rejects oversized input without partially applying it", () => {
+  const dictionary = compile("first=one\n" + "x".repeat(MAX_BYTES) + "=partial");
+  assert.equal(dictionary.count, 0);
+  assert.equal(dictionary.apply("first last"), "first last");
+  assert.equal(dictionary.errors[0].reason, "too-large");
 });
 
-test("entry bound still permits later duplicate rules to overwrite existing entries", () => {
-  const source = Array.from({ length: MAX_ENTRIES + 1 }, (_, index) => "item" + index + "=value" + index).join("\n") + "\nitem0=last";
-  const dictionary = compile(source);
-  assert.equal(dictionary.count, MAX_ENTRIES);
-  assert.equal(dictionary.apply("item0 item1000"), "last value1000");
-  // item1000 has no own rule; its item100 prefix is replaced literally.
-  assert(dictionary.errors.some(error => error.reason === "too-many-entries"));
+test("large dictionaries support more than 1000 entries with longest literal matching", () => {
+  const dictionary = compile(Array.from({ length: 1001 }, (_, i) => "t" + i + "=x").join("\n"));
+  assert.equal(dictionary.count, 1001);
+  assert.equal(dictionary.errors.length, 0);
+  assert.equal(dictionary.apply("t0 t1000 t100"), "x x x");
 });
 
 test("each streaming update is processed from the latest raw output without modifying rules", () => {
@@ -91,4 +88,35 @@ test("each streaming update is processed from the latest raw output without modi
   assert.equal(dictionary.apply("hel"), "hel");
   assert.equal(dictionary.apply("hello"), "안녕");
   assert.equal(dictionary.apply("hello hello"), "안녕 안녕");
+});
+
+test("a single term can fill the byte budget without allocating a node per character", () => {
+  const term = "x".repeat(MAX_BYTES - 2);
+  const dictionary = compile(term + "=y");
+  assert.equal(dictionary.errors.length, 0);
+  assert.equal(dictionary.count, 1);
+  assert.equal(dictionary.apply(term), "y");
+  assert.equal(dictionary.apply("short subtitle"), "short subtitle");
+});
+
+test("compressed edges split correctly for branching and terminal prefixes in every insertion order", () => {
+  const entries = ["abcdef=LONG", "abc=PREFIX", "abcxyz=BRANCH", "ab=SHORT", "abd=OTHER", "bcd=LATER", "LONG=NO-CASCADE"];
+  for (const ordered of [entries, [...entries].reverse(), [...entries.slice(3), ...entries.slice(0, 3)]]) {
+    const dictionary = compile(ordered.join("\n"));
+    assert.equal(dictionary.apply("abcdef abcxyz abc ab abd abcd abcxy LONG"),
+      "LONG BRANCH PREFIX SHORT OTHER PREFIXd PREFIXxy NO-CASCADE");
+  }
+});
+
+test("compressed edges preserve supplementary Unicode branches and unmatched surrogate pairs", () => {
+  for (const source of ["🐈猫=A\n🐈犬=B\n🐈=C\n🐉=D", "🐉=D\n🐈=C\n🐈犬=B\n🐈猫=A"]) {
+    const dictionary = compile(source);
+    assert.equal(dictionary.apply("🐈猫🐈犬🐈🐉🐊𐐀"), "ABCD🐊𐐀");
+  }
+});
+
+
+test("lone surrogate rules cannot split valid emoji", () => {
+  const dictionary = compile("\ud83d=high\n\udc08=low\n🐈=cat");
+  assert.equal(dictionary.apply("🐈 🐉 \ud83d \udc08"), "cat 🐉 high low");
 });

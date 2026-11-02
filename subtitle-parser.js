@@ -244,6 +244,95 @@
     return cues.sort((first, second) => first.start - second.start);
   }
 
+  function decodeArrayBuffer(buffer, preferredEncoding) {
+    const bytes = new Uint8Array(buffer);
+    if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+      return new TextDecoder("utf-8").decode(bytes.subarray(3));
+    }
+    if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+      return new TextDecoder("utf-16le").decode(bytes.subarray(2));
+    }
+    if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+      return new TextDecoder("utf-16be").decode(bytes.subarray(2));
+    }
+
+    if (preferredEncoding && preferredEncoding !== "auto") {
+      try {
+        return new TextDecoder(preferredEncoding).decode(bytes);
+      } catch {
+        // Continue with automatic detection.
+      }
+    }
+
+    // ASCII timing syntax in BOM-less UTF-16 is also valid UTF-8 with NULs.
+    // Check its byte order before UTF-8, using the prefix rather than allowing
+    // a long non-ASCII cue to drown out the subtitle's timing/header syntax.
+    const sampleLength = Math.min(bytes.length, 4096);
+    let evenZeros = 0;
+    let oddZeros = 0;
+    for (let index = 0; index + 1 < sampleLength; index += 2) {
+      if (bytes[index] === 0) evenZeros += 1;
+      if (bytes[index + 1] === 0) oddZeros += 1;
+    }
+    const utf16Encoding = oddZeros > sampleLength / 8 && oddZeros > evenZeros * 2 ? "utf-16le"
+      : evenZeros > sampleLength / 8 && evenZeros > oddZeros * 2 ? "utf-16be" : null;
+    if (utf16Encoding) {
+      try {
+        return new TextDecoder(utf16Encoding, { fatal: true }).decode(bytes);
+      } catch {
+        // Invalid UTF-16 should still get the normal encoding fallbacks.
+      }
+    }
+
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      // UTF-8 did not validate; try Korean and Western encodings below.
+    }
+
+    for (const encoding of ["euc-kr", "windows-1252"]) {
+      try {
+        return new TextDecoder(encoding).decode(bytes);
+      } catch {
+        // Try the next encoding.
+      }
+    }
+
+    return Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  }
+
+  function microDvdInfo(text) {
+    const source = String(text || "").replace(/^\uFEFF/, "");
+    if (source.includes("\0") || !/^\s*\{\d+\}\{\d*\}/m.test(source)) {
+      throw Object.assign(new Error("이미지 기반 SUB는 지원하지 않습니다. MicroDVD 텍스트 자막을 선택하세요."), { code: "unsupported_sub" });
+    }
+    const first = source.trim().split(/\r?\n/, 1)[0];
+    const header = first.match(/^\{([01])\}\{\1\}\s*(\d+(?:\.\d+)?)\s*$/);
+    const fps = header ? Number(header[2]) : null;
+    return { fps: fps >= 1 && fps <= 240 ? fps : null, hasHeader: Boolean(header) };
+  }
+
+  function parseMicroDvd(text, options = {}) {
+    const info = microDvdInfo(text);
+    const fps = info.fps || Number(options.fps);
+    if (!Number.isFinite(fps) || fps < 1 || fps > 240) {
+      throw Object.assign(new Error("MicroDVD 자막의 FPS를 입력하세요 (1~240)."), { code: "microdvd_fps_required" });
+    }
+    const lines = String(text || "").replace(/^\uFEFF/, "").trim().split(/\r?\n/);
+    const cues = [];
+    for (const [index, line] of lines.entries()) {
+      if (index === 0 && info.hasHeader) continue;
+      const match = line.match(/^\s*\{(\d+)\}\{(\d+)\}(.*)$/);
+      if (!match) continue;
+      const start = Number(match[1]) / fps;
+      const end = Number(match[2]) / fps;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+      const value = sanitizeCueMarkup(match[3].replace(/\{[yYfFsScCpPoOhH]:[^}]*\}/g, "").replace(/\|/g, "\n"));
+      if (value.trim()) cues.push({ start, end, text: value });
+    }
+    return cues.sort((a, b) => a.start - b.start);
+  }
+
   function guessFormatByFilename(filename) {
     const lower = String(filename || "").toLowerCase();
     if (lower.endsWith(".srt")) {
@@ -258,10 +347,11 @@
     if (lower.endsWith(".smi") || lower.endsWith(".sami")) {
       return "smi";
     }
+    if (lower.endsWith(".sub")) return "sub";
     return "auto";
   }
 
-  function parse(format, text) {
+  function parse(format, text, options = {}) {
     const normalizedFormat = String(format || "auto").toLowerCase();
     if (normalizedFormat === "srt") {
       return parseSrt(text);
@@ -275,8 +365,10 @@
     if (normalizedFormat === "smi" || normalizedFormat === "sami") {
       return parseSmi(text);
     }
+    if (["sub", "microdvd"].includes(normalizedFormat)) return parseMicroDvd(text, options);
 
     const source = String(text || "").replace(/^\uFEFF/, "");
+    if (/^\s*\{\d+\}\{\d*\}/m.test(source)) return parseMicroDvd(source, options);
     if (/^WEBVTT(?:\s|$)/i.test(source) || /^\s*\d+:\d{2}\.\d{3}\s*-->/m.test(source)) {
       return parseVtt(source);
     }
@@ -293,8 +385,11 @@
   }
 
   window.NyanKatSubtitleParser = Object.freeze({
+    decode: decodeArrayBuffer,
     guessFormatByFilename,
     parse,
+    microDvdInfo,
+    parseMicroDvd,
     parseAss,
     parseSmi,
     parseSrt,
