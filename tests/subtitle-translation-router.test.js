@@ -121,6 +121,22 @@ test("the top frame is asked once and queued requests keep only the newest line 
   assert.equal(h.timers.size, 0, "host registration cancels its timeout");
 });
 
+test("Japanese speech prewarm is validated and restored when the host reconnects", () => {
+  const h = harness();
+  const client = h.client();
+  client.send({ type: "configure", sourceLanguage: "ja", prewarm: "true" });
+  client.send({ type: "configure", sourceLanguage: "en", prewarm: true });
+  assert.equal(client.messages.filter(message => message.reason === "invalid_translation_request").length, 2);
+  client.send({ type: "configure", sourceLanguage: "ja", prewarm: true });
+  const first = h.host();
+  assert.equal(first.messages.find(message => message.type === "configure").prewarm, true);
+  first.disconnect();
+  const second = h.host();
+  assert.equal(second.messages.find(message => message.type === "configure").prewarm, true);
+  client.send({ type: "configure", sourceLanguage: "en" });
+  assert.equal(second.messages.at(-1).prewarm, undefined);
+});
+
 test("five upcoming cues are validated, bounded, and replayed to a newly connected host", () => {
   const h = harness();
   const client = h.client();

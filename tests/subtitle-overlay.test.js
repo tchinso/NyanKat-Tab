@@ -91,10 +91,30 @@ async function harness(options = {}) {
   const translationPorts = [];
   const resizeObservers = [];
   let nextFrame = 1;
+  let clock = 0, nextTimer = 1;
+  const timers = new Map();
+  const now = () => clock;
+  function setTimer(callback, delay = 0) {
+    if (!options.fakeTimers) return 1;
+    const id = nextTimer++;
+    timers.set(id, { callback, due: clock + Math.max(0, Number(delay) || 0) });
+    return id;
+  }
+  function advance(ms) {
+    const end = clock + ms;
+    for (let count = 0; count < 10000; count++) {
+      const due = [...timers.entries()].filter(([, timer]) => timer.due <= end)
+        .sort((a, b) => a[1].due - b[1].due)[0];
+      if (!due) { clock = end; return; }
+      clock = due[1].due; timers.delete(due[0]); due[1].callback();
+    }
+    throw new Error('timer loop did not settle');
+  }
   const window = {
     innerWidth: 1600, innerHeight: 1000,
     addEventListener() {},
-    setTimeout() { return 1; }, clearTimeout() {}, setInterval() { return 2; },
+    setTimeout: setTimer, clearTimeout(id) { timers.delete(id); }, setInterval() { return 2; },
+    performance: { now },
     requestAnimationFrame(fn) { const id = nextFrame++; frames.set(id, fn); return id; },
     cancelAnimationFrame(id) { frames.delete(id); },
     getComputedStyle() { return { display: "block", visibility: "visible", opacity: "1", paddingTop: "0px", paddingBottom: "0px" }; }
@@ -121,6 +141,7 @@ async function harness(options = {}) {
     HTMLMediaElement: { HAVE_NOTHING: 0, HAVE_CURRENT_DATA: 2 },
     Node: { ELEMENT_NODE: 1, DOCUMENT_NODE: 9, DOCUMENT_FRAGMENT_NODE: 11 },
     MutationObserver: Observer, ResizeObserver, TextDecoder, setTimeout: window.setTimeout, clearTimeout: window.clearTimeout,
+    performance: window.performance, Date: options.fakeTimers ? class extends Date { static now() { return clock; } } : Date,
     atob: value => Buffer.from(value, "base64").toString("binary")
   });
   vm.runInContext(read("subtitle-style.js"), context);
@@ -138,7 +159,7 @@ async function harness(options = {}) {
     return response;
   }
   return {
-    window, document, video, chrome, message, fontRequests, translationPorts, resizeObservers,
+    window, document, video, chrome, message, fontRequests, translationPorts, resizeObservers, advance,
     layer(name) { return document.querySelector(".nyankat-subtitle-" + name); },
     load(settings) {
       return message("NYANKAT_SUBTITLE_LOAD", {
@@ -163,6 +184,9 @@ test('live speech uses translation and style, invalidates seeks, and yields to f
   h.video.paused = false;
   const speech = payload => h.message('NYANKAT_SUBTITLE_SPEECH', { session: 's1', revision: 0, ...payload });
   assert.equal(speech({ action: 'begin' }).ok, true);
+  const initial = h.translationPorts.at(-1).messages.find(m => m.type === 'configure');
+  assert.equal(initial.sourceLanguage, 'ja');
+  assert.equal(initial.prewarm, true, 'speech starts translator initialization before the first result');
   speech({ action: 'text', text: 'こんにちは' });
   assert.equal(h.layer('fill').textContent, 'こんにちは');
   const port = h.translationPorts.at(-1);
@@ -181,6 +205,181 @@ test('live speech uses translation and style, invalidates seeks, and yields to f
   assert.equal(h.layer('fill').textContent, 'Hello & 한글\nsecond line');
   assert.equal(speech({ action: 'end' }).ok, false);
   assert.ok(h.layer('overlay'), 'late session end must not remove file subtitles');
+});
+
+async function speechQueueHarness() {
+  const h = await harness({ fakeTimers: true });
+  h.video.paused = false;
+  const send = (action, text, revision = 0) => h.message('NYANKAT_SUBTITLE_SPEECH',
+    { session: 'speech-queue', revision, action, ...(text === undefined ? {} : { text }) });
+  assert.equal(send('begin').ok, true);
+  const port = h.translationPorts.at(-1);
+  return { ...h, send, port, requests: () => port.messages.filter(message => message.type === 'translate') };
+}
+
+test('speech translation is FIFO and the completed streaming result stays visible for 500 ms', async () => {
+  const h = await speechQueueHarness();
+  h.send('text', 'one'); h.send('text', 'two'); h.send('text', 'three');
+  assert.deepEqual(h.requests().map(request => request.text), ['one']);
+  const first = h.requests()[0];
+  h.port.onMessage.emit({ type: 'update', requestId: first.requestId, text: '첫' });
+  h.advance(10000);
+  h.port.onMessage.emit({ type: 'update', requestId: first.requestId, text: '첫 문' });
+  h.advance(10000);
+  assert.equal(h.layer('fill').textContent, '첫 문');
+  assert.equal(h.requests().length, 1, 'regular streaming progress extends the 12-second stall timeout');
+  assert.equal(h.port.messages.some(message => message.type === 'cancel' && message.requestId === first.requestId), false);
+  h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '첫 문장' });
+  h.advance(499);
+  assert.equal(h.layer('fill').textContent, '첫 문장');
+  assert.equal(h.requests().length, 1);
+  h.advance(1);
+  assert.deepEqual(h.requests().map(request => request.text), ['one', 'two']);
+  const second = h.requests()[1];
+  h.port.onMessage.emit({ type: 'done', requestId: second.requestId, text: '둘째' });
+  h.advance(500);
+  assert.deepEqual(h.requests().map(request => request.text), ['one', 'two', 'three']);
+});
+
+test('speech translation queue drops only its oldest waiting item when it exceeds 24', async () => {
+  const h = await speechQueueHarness();
+  for (let i = 0; i < 27; i++) h.send('text', `line ${i}`);
+  assert.deepEqual(h.requests().map(request => request.text), ['line 0']);
+  const first = h.requests()[0];
+  h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '첫째' });
+  h.advance(500);
+  assert.deepEqual(h.requests().map(request => request.text), ['line 0', 'line 3']);
+});
+
+for (const event of ['seeking', 'pause', 'ended']) {
+  test(`speech queue discards active and waiting translations on ${event}`, async () => {
+    const h = await speechQueueHarness();
+    h.send('text', 'old'); h.send('text', 'queued');
+    const first = h.requests()[0];
+    if (event !== 'seeking') h.video.paused = true;
+    h.video.emit(event);
+    h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '이전 결과' });
+    h.advance(13000);
+    assert.equal(h.layer('fill').textContent, '');
+    assert.equal(h.requests().length, 1);
+    assert.ok(h.port.messages.some(message => message.type === 'cancel' && message.requestId === first.requestId));
+  });
+}
+
+test('stopping speech discards its queue and ignores a late translation', async () => {
+  const h = await speechQueueHarness();
+  h.send('text', 'old'); h.send('text', 'queued');
+  const first = h.requests()[0];
+  h.send('end');
+  h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '이전 결과' });
+  h.advance(13000);
+  assert.equal(h.requests().length, 1);
+  assert.notEqual(h.layer('fill')?.textContent, '이전 결과');
+  assert.ok(h.port.messages.some(message => message.type === 'cancel' && message.requestId === first.requestId));
+});
+
+test('invalidated extension context does not throw during speech playback events', async () => {
+  for (const event of ['pause', 'play', 'seeking', 'ended']) {
+    const h = await speechQueueHarness();
+    h.send('text', 'old'); h.send('text', 'queued');
+    const first = h.requests()[0];
+    h.chrome.runtime.sendMessage = () => { throw new Error('Extension context invalidated.'); };
+    assert.doesNotThrow(() => h.video.emit(event), event);
+    h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '이전 결과' });
+    h.advance(13000);
+    assert.equal(h.layer('fill').textContent, '', `${event}: stale text stays cleared`);
+    assert.equal(h.requests().length, 1, `${event}: queued speech stays discarded`);
+  }
+});
+
+test('invalidated extension context does not interrupt speech unload or replacing it with file subtitles', async () => {
+  for (const action of ['unload', 'replace']) {
+    const h = await speechQueueHarness();
+    h.send('text', 'old'); h.send('text', 'queued');
+    const first = h.requests()[0];
+    h.chrome.runtime.sendMessage = () => { throw new Error('Extension context invalidated.'); };
+    let response;
+    assert.doesNotThrow(() => {
+      response = action === 'unload' ? h.message('NYANKAT_SUBTITLE_UNLOAD') : h.load();
+    }, action);
+    assert.equal(response.ok, true);
+    h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '이전 결과' });
+    h.advance(13000);
+    assert.notEqual(h.layer('fill')?.textContent, '이전 결과');
+    assert.equal(h.requests().length, 1);
+    if (action === 'replace') assert.equal(h.layer('fill').textContent, 'Hello & 한글\nsecond line');
+  }
+});
+
+test('speech unload completes local cleanup when the translation port disconnect throws', async () => {
+  const h = await speechQueueHarness();
+  h.send('text', 'old'); h.send('text', 'queued');
+  const first = h.requests()[0];
+  h.port.disconnect = () => { throw new Error('Extension context invalidated.'); };
+  let response;
+  assert.doesNotThrow(() => { response = h.message('NYANKAT_SUBTITLE_UNLOAD'); });
+  assert.equal(response.ok, true);
+  assert.equal(h.layer('overlay'), null);
+  h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '이전 결과' });
+  h.advance(13000);
+  assert.equal(h.layer('overlay'), null);
+  assert.equal(h.requests().length, 1);
+  assert.equal(h.video.listeners.get('seeking').length, 0);
+});
+
+test('failed speech translation and a 12-second wait both fall back and advance', async () => {
+  const h = await speechQueueHarness();
+  h.send('text', 'first'); h.send('text', 'second'); h.send('text', 'third');
+  const first = h.requests()[0];
+  h.port.onMessage.emit({ type: 'error', requestId: first.requestId, reason: 'failed' });
+  assert.equal(h.layer('fill').textContent, 'first');
+  h.advance(499);
+  assert.equal(h.requests().length, 1);
+  h.advance(1);
+  assert.equal(h.requests()[1].text, 'second');
+  h.advance(11999);
+  assert.equal(h.requests().length, 2);
+  h.advance(1);
+  assert.equal(h.layer('fill').textContent, 'second');
+  h.advance(500);
+  assert.equal(h.requests()[2].text, 'third');
+});
+
+test('glossary changes restart unfinished speech without losing queued subtitles', async () => {
+  const h = await speechQueueHarness();
+  h.send('text', 'current');
+  for (let i = 0; i < 24; i++) h.send('text', `queued ${i}`);
+  const first = h.requests()[0];
+  h.chrome.storage.onChanged.emit({ subtitleSourceGlossary: { newValue: 'a=b' } }, 'local');
+  const nextPort = h.translationPorts.at(-1);
+  assert.notEqual(nextPort, h.port);
+  const retried = nextPort.messages.findLast(message => message.type === 'translate');
+  assert.equal(retried.text, 'current');
+  h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: 'stale' });
+  nextPort.onMessage.emit({ type: 'done', requestId: retried.requestId, text: '현재' });
+  h.advance(500);
+  for (let i = 0; i < 24; i++) {
+    const request = nextPort.messages.filter(message => message.type === 'translate').at(-1);
+    assert.equal(request.text, `queued ${i}`);
+    nextPort.onMessage.emit({ type: 'done', requestId: request.requestId, text: `번역 ${i}` });
+    h.advance(500);
+  }
+  assert.equal(nextPort.messages.filter(message => message.type === 'translate').length, 25);
+});
+
+test('glossary changes do not interrupt the completed speech caption hold', async () => {
+  const h = await speechQueueHarness();
+  h.send('text', 'current'); h.send('text', 'next');
+  const first = h.requests()[0];
+  h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '현재' });
+  h.advance(250);
+  h.chrome.storage.onChanged.emit({ subtitleSourceGlossary: { newValue: 'a=b' } }, 'local');
+  assert.equal(h.layer('fill').textContent, '현재');
+  h.advance(249);
+  assert.equal(h.layer('fill').textContent, '현재');
+  h.advance(1);
+  const nextPort = h.translationPorts.at(-1);
+  assert.equal(nextPort.messages.filter(message => message.type === 'translate').at(-1).text, 'next');
 });
 
 test("gradient fill, double outline, background opacity and shadow render independently", async () => {

@@ -885,7 +885,7 @@
     const port = record.translationPort;
     record.translationPort = null;
     record.prefetchStartIndex = -1;
-    port?.disconnect();
+    try { port?.disconnect(); } catch { /* The extension context may already be gone. */ }
   }
 
   function connectTranslation(record) {
@@ -898,20 +898,30 @@
         if (message.type === "status") {
           record.translationStatus = message.status;
           if (record.translationRequest && ["error", "unavailable"].includes(message.status?.state)) {
-            record.rawTranslatedText = null;
-            setCueText(record, record.speechText || record.cues[record.currentCueIndex]?.text || "");
+            if (record.speechSession && record.speechActive) finishSpeechTranslation(record, false);
+            else {
+              record.rawTranslatedText = null;
+              setCueText(record, record.speechText || record.cues[record.currentCueIndex]?.text || "");
+            }
           }
           return;
         }
         if (message.requestId !== record.translationRequest) return;
         if (message.type === "update" || message.type === "done") {
+          if (message.type === "update" && record.speechSession && record.speechActive) armSpeechTimeout(record, record.speechActive);
           setTranslatedCueText(record, String(message.text || ""));
-          if (message.type === "done") record.translationRequest = "";
+          if (message.type === "done") {
+            record.translationRequest = "";
+            if (record.speechSession && record.speechActive) finishSpeechTranslation(record, !!String(message.text || "").trim());
+          }
         } else if (message.type === "error") {
           record.translationStatus = { state: "error", code: message.reason };
-          record.rawTranslatedText = null;
-          setCueText(record, record.speechText || record.cues[record.currentCueIndex]?.text || "");
-          record.translationRequest = "";
+          if (record.speechSession && record.speechActive) finishSpeechTranslation(record, false);
+          else {
+            record.rawTranslatedText = null;
+            setCueText(record, record.speechText || record.cues[record.currentCueIndex]?.text || "");
+            record.translationRequest = "";
+          }
         }
       });
       port.onDisconnect.addListener(() => {
@@ -924,8 +934,10 @@
         record.prefetchStartIndex = -1;
         record.translationRequest = "";
         record.translationStatus = { state: "error", code: "translation_host_disconnected" };
+        if (record.speechSession && record.speechActive) finishSpeechTranslation(record, false);
       });
-      port.postMessage({ type: "configure", sourceLanguage: record.sourceLanguage });
+      port.postMessage({ type: "configure", sourceLanguage: record.sourceLanguage,
+        ...(record.speechSession ? { prewarm: true } : {}) });
       return port;
     } catch {
       record.translationStatus = { state: "unavailable", code: "translation_host_unavailable" };
@@ -935,12 +947,14 @@
 
   function requestTranslation(record, text) {
     const port = connectTranslation(record);
-    if (!port) return;
+    if (!port) return false;
     record.translationRequest = record.id + ":" + nextTranslationRequest++;
     try {
       port.postMessage({ type: "translate", requestId: record.translationRequest, sourceLanguage: record.sourceLanguage, text });
+      return true;
     } catch {
       disconnectTranslation(record);
+      return false;
     }
   }
 
@@ -1107,6 +1121,7 @@
       currentCueStart: record.cues[record.currentCueIndex]?.start ?? null,
       sourceLanguage: record.sourceLanguage,
       translationStatus: record.translationStatus,
+      speechDropped: record.speechDropped || 0,
       settings: { ...record.settings }
     };
   }
@@ -1186,15 +1201,102 @@
     return { ok: true, state: getState(record) };
   }
 
+  const SPEECH_QUEUE_LIMIT = 24;
+  const SPEECH_HOLD_MS = 500;
+  const SPEECH_TIMEOUT_MS = 12000;
+
+  function armSpeechTimeout(record, active) {
+    clearTimeout(record.speechTimer);
+    record.speechTimer = setTimeout(() => {
+      if (record.speechActive === active && !active.finished) finishSpeechTranslation(record, false, true);
+    }, SPEECH_TIMEOUT_MS);
+  }
+
+  function resetSpeechQueue(record) {
+    clearTimeout(record.speechTimer);
+    clearTimeout(record.speechHoldTimer);
+    record.speechTimer = 0;
+    record.speechHoldTimer = 0;
+    record.speechQueue = [];
+    record.speechActive = null;
+    cancelTranslation(record);
+    record.speechText = '';
+    record.rawTranslatedText = null;
+  }
+
+  function advanceSpeech(record) {
+    if (!record.speechSession) return;
+    const active = record.speechActive;
+    if (active && !active.canAdvance) return;
+    if (active && !record.speechQueue.length && !active.expired) return;
+    clearTimeout(record.speechTimer);
+    clearTimeout(record.speechHoldTimer);
+    record.speechTimer = 0;
+    record.speechHoldTimer = 0;
+    record.speechActive = null;
+    cancelTranslation(record);
+    const text = record.speechQueue.shift();
+    if (text === undefined) {
+      record.speechText = '';
+      record.rawTranslatedText = null;
+      setCueText(record, '');
+      return;
+    }
+    startSpeechTranslation(record, text);
+  }
+
+  function startSpeechTranslation(record, text) {
+    record.speechActive = { canAdvance: false, expired: false, finished: false };
+    record.speechText = text;
+    record.rawTranslatedText = null;
+    setCueText(record, text);
+    // Waiting for a model or a stalled provider must not block the queue forever.
+    armSpeechTimeout(record, record.speechActive);
+    if (!requestTranslation(record, text)) finishSpeechTranslation(record, false);
+  }
+
+  function finishSpeechTranslation(record, translated, expired = false) {
+    const active = record.speechActive;
+    if (!active || active.finished) return;
+    active.finished = true;
+    active.expired = expired;
+    clearTimeout(record.speechTimer);
+    record.speechTimer = 0;
+    cancelTranslation(record);
+    if (!translated) {
+      record.rawTranslatedText = null;
+      setCueText(record, record.speechText);
+    }
+    if (!expired) record.speechTimer = setTimeout(() => {
+      if (record.speechActive !== active) return;
+      active.expired = true;
+      advanceSpeech(record);
+    }, SPEECH_TIMEOUT_MS);
+    // The final translation (or fallback) is kept for 500 ms after completion,
+    // even when streaming partials were displayed much earlier.
+    record.speechHoldTimer = setTimeout(() => {
+      if (record.speechActive !== active) return;
+      active.canAdvance = true;
+      advanceSpeech(record);
+    }, SPEECH_HOLD_MS);
+  }
+
+  function sendSpeechControl(payload) {
+    try {
+      // An extension reload invalidates the old content script immediately;
+      // sendMessage can throw before it returns a promise in that context.
+      chrome.runtime.sendMessage({ type: 'NYANKAT_SPEECH_CONTROL', ...payload }).catch(() => {});
+    } catch { /* The page can outlive its extension context. */ }
+  }
+
   function stopSpeech(record) {
     if (!record.speechSession) return;
     const session = record.speechSession;
     record.speechSession = "";
-    record.speechText = "";
-    clearTimeout(record.speechTimer);
+    resetSpeechQueue(record);
     for (const event of ['pause', 'play', 'seeking', 'ended']) record.video.removeEventListener(event, record.speechHandler);
     record.speechHandler = null;
-    chrome.runtime.sendMessage({ type: 'NYANKAT_SPEECH_CONTROL', session, stop: true }).catch(() => {});
+    sendSpeechControl({ session, stop: true });
   }
 
   function speechMessage(record, payload) {
@@ -1203,20 +1305,18 @@
       if (!ensureOverlay(record)) return { ok: false };
       record.speechSession = payload.session;
       record.speechRevision = 0;
-      record.speechText = '';
-      record.rawTranslatedText = null;
+      resetSpeechQueue(record);
+      record.speechDropped = 0;
       record.sourceLanguage = 'ja';
       record.syncControls.hidden = true;
       applyStyle(record);
       connectTranslation(record);
       record.speechHandler = () => {
         record.speechRevision++;
-        record.speechText = ''; record.rawTranslatedText = null;
-        clearTimeout(record.speechTimer);
-        cancelTranslation(record); setCueText(record, '');
-        chrome.runtime.sendMessage({ type: 'NYANKAT_SPEECH_CONTROL', session: record.speechSession,
+        resetSpeechQueue(record); setCueText(record, '');
+        sendSpeechControl({ session: record.speechSession,
           revision: record.speechRevision, paused: record.video.paused || record.video.ended,
-          stop: record.video.ended }).catch(() => {});
+          stop: record.video.ended });
       };
       for (const event of ['pause', 'play', 'seeking', 'ended']) record.video.addEventListener(event, record.speechHandler);
       return { ok: true };
@@ -1224,13 +1324,14 @@
     if (record.speechSession !== payload.session) return { ok: false };
     if (payload.action === 'end') { unloadSubtitle(record); return { ok: true }; }
     if (payload.action === 'text' && payload.revision === record.speechRevision && !record.video.paused && !record.video.ended) {
-      clearTimeout(record.speechTimer); cancelTranslation(record);
-      record.speechText = String(payload.text || ''); record.rawTranslatedText = null;
-      setCueText(record, record.speechText);
-      requestTranslation(record, record.speechText);
-      record.speechTimer = setTimeout(() => {
-        cancelTranslation(record); record.speechText = ''; record.rawTranslatedText = null; setCueText(record, '');
-      }, 12000);
+      const text = String(payload.text || '');
+      if (!text.trim()) return { ok: true };
+      if (record.speechQueue.length >= SPEECH_QUEUE_LIMIT) {
+        record.speechQueue.shift();
+        record.speechDropped++;
+      }
+      record.speechQueue.push(text);
+      advanceSpeech(record);
     }
     return { ok: true };
   }
@@ -1387,11 +1488,16 @@
         if (areaName === "local" && changes.subtitleSourceGlossary) {
           for (const record of recordsById.values()) {
             disconnectTranslation(record);
-            record.rawTranslatedText = null;
             if (record.speechSession) {
-              setCueText(record, record.speechText);
-              if (record.speechText) requestTranslation(record, record.speechText);
+              if (record.speechActive && !record.speechActive.finished && record.speechText) {
+                // Restart unfinished work without changing the waiting queue.
+                // A completed result keeps its minimum display time.
+                clearTimeout(record.speechTimer);
+                clearTimeout(record.speechHoldTimer);
+                startSpeechTranslation(record, record.speechText);
+              }
             } else {
+              record.rawTranslatedText = null;
               record.currentCueIndex = -2;
               renderCue(record);
             }

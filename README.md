@@ -1,6 +1,6 @@
 # NyanKatX3 Tab
 
-Current release: **1.6.1**.
+Current release: **1.6.2**.
 
 Chrome MV3 extension for:
 
@@ -93,15 +93,16 @@ Run the automated checks with `node --test`. See the [1.3.3 installed-extension 
 ## Japanese speech subtitles
 
 Open **자막 → 음성인식** (to the right of **추출·검색**), select a video,
-press **음성 모델 준비**, and wait for preparation to finish before pressing
-**시작**. The first preparation downloads approximately 656 MB into the extension's
+press **음성·번역 모델 준비**, and wait for preparation to finish before pressing
+**시작**. Keep the popup open until the browser's Japanese-to-Korean translation
+model is ready. The first speech preparation downloads approximately 656 MB into the extension's
 Cache Storage. Subsequent preparations reuse that cache. **중지** releases the
 capture and model worker; **모델 캐시 삭제** also removes downloaded speech models.
 The popup can close while recognition continues.
 
 The fixed pipeline is Japanese Parakeet 0.6B INT8 CTC → Japanese text → the existing
-browser Translator API → Korean overlay. If the translation model needs setup,
-click **번역 모델 준비** in the frame shown over the playback page. Japanese is
+browser Translator API → Korean overlay. If the browser cannot prepare translation
+from the popup, retry there or click **번역 모델 준비** in the frame shown over the playback page. Japanese is
 shown while translation is unavailable. Existing subtitle styles and the Korean
 postprocessing dictionary apply. Starting speech replaces the selected video's
 file subtitles; applying a subtitle file stops speech recognition for that video.
@@ -109,10 +110,30 @@ file subtitles; applying a subtitle file stops speech recognition for that video
 The extension captures all audio in the selected tab, not an isolated video track.
 Only one tab can be recognized at a time. Pausing clears queued speech; resuming
 restarts segmentation. Seeks discard stale audio and translation results. Closing
-or navigating the target page stops capture. Silence detection is amplitude-based;
-background music can affect segmentation and transcription. Processing uses local
-WASM SIMD with one thread; audio is not uploaded. Segment collection, inference,
-and translation introduce delay, and slower machines may skip queued segments.
+or navigating the target page stops capture. Silero VAD uses a 0.20 speech
+threshold, a 0.2-second minimum unpadded speech span, and a 0.25-second
+speech-end delay, and detects speech in a
+separate worker while Parakeet processes completed segments. Both use local
+single-threaded WASM SIMD; audio is not uploaded. The bounded recognition queue
+discards its oldest waiting segment if it fills and reports the loss in the status.
+Background music and model errors can still affect detection and transcription.
+Segment collection, inference, and translation introduce delay.
+Speech subtitles are processed in order, with each completed translation shown for
+at least 0.5 seconds before the next one. Up to 24 recognized results can wait;
+if that queue fills, the oldest waiting result is discarded. Rapid dialogue can
+therefore make subtitles lag behind playback.
+
+For optional diagnostics, stop recognition, open the extension offscreen
+document's DevTools console, and run
+`chrome.runtime.sendMessage({type:'NYANKAT_SPEECH_OFFSCREEN',action:'prepare',debug:true})`.
+After starting recognition normally, query
+`chrome.runtime.sendMessage({type:'NYANKAT_SPEECH_OFFSCREEN',action:'status'})`.
+The returned `state.metrics` contains VAD frame count, mean and maximum inference
+time, the estimated speech-end-to-queue delay, most recent Parakeet inference and
+queue wait times, total and currently queued chunks, dropped chunks, and audio
+losses. Times are in milliseconds. Diagnostics are disabled by default and are
+reset when models are prepared again; the end-to-queue time is an estimate based
+on the capture timeline, not a measurement of subtitle display or translation.
 
 `tabCapture` and `offscreen` permissions support capture after an explicit start;
 the local WASM runtime requires `wasm-unsafe-eval` in the extension CSP. Capture
@@ -121,7 +142,8 @@ Model URLs are pinned to revisions in `speech-core.mjs`. Attribution, runtime
 license, and browser measurements are in [the probe documentation](tools/speech-probe/README.md)
 and [the runtime notice](vendor/onnxruntime/README.md). These speech models originate
 from NVIDIA NeMo (CC BY 4.0), with CTC conversion by sherpa-onnx and frontend export
-by visuall. No RealTimeSubtitle source code is incorporated.
+by visuall. Silero VAD is from the Silero Team (MIT license). No RealTimeSubtitle
+source code is incorporated.
 
 ## Subtitle display styles
 

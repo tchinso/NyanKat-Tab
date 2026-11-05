@@ -115,7 +115,8 @@
   function forwardClient(entry, client) {
     if (!entry.host) return;
     if (client.language) {
-      post(entry.host, { type: "configure", clientId: client.id, sourceLanguage: client.language });
+      post(entry.host, { type: "configure", clientId: client.id, sourceLanguage: client.language,
+        ...(client.prewarm ? { prewarm: true } : {}) });
     }
     const request = client.request;
     if (request && !request.forwarded) {
@@ -154,14 +155,20 @@
       post(client.port, { type: "error", ...(validRequestId(message.requestId) ? { requestId: message.requestId } : {}), reason: "invalid_source_language" });
       return;
     }
+    if (message.type === "configure" && message.prewarm !== undefined &&
+      (typeof message.prewarm !== "boolean" || (message.prewarm && message.sourceLanguage !== "ja"))) {
+      post(client.port, { type: "error", reason: "invalid_translation_request" });
+      return;
+    }
     if (message.type === "translate" &&
       (!validRequestId(message.requestId) || !validText(message.text, MAX_TEXT_BYTES))) {
       post(client.port, { type: "error", ...(validRequestId(message.requestId) ? { requestId: message.requestId } : {}), reason: "invalid_translation_request" });
       return;
     }
     stopRequest(entry, client);
-    if (client.language && client.language !== message.sourceLanguage) client.prefetch = null;
+    if (client.language && client.language !== message.sourceLanguage) { client.prefetch = null; client.prewarm = false; }
     client.language = message.sourceLanguage;
+    if (message.type === "configure") client.prewarm = message.prewarm === true;
     if (message.type === "translate") {
       client.request = {
         requestId: message.requestId, sourceLanguage: message.sourceLanguage,
@@ -183,7 +190,7 @@
       entry = { clients: new Map(), host: null, ensureSent: false, needsRestart: true, hostTimer: 0 };
       tabs.set(tabId, entry);
     }
-    const client = { id: "client-" + (++nextClientId), port, language: "", request: null, prefetch: null };
+    const client = { id: "client-" + (++nextClientId), port, language: "", request: null, prefetch: null, prewarm: false };
     entry.clients.set(client.id, client);
     clientCount += 1;
     port.onMessage.addListener(message => onClientMessage(tabId, entry, client, message));

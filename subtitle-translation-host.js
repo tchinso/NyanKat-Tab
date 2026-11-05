@@ -305,6 +305,13 @@
     if (message.type === "configure") {
       send({ type: "status", clientId: message.clientId, sourceLanguage: language, status: entry.session.status });
       updateUi();
+      // Speech translation can initialize an already-downloaded model while the
+      // first utterance is being captured. Never initiate a download without the
+      // host document's own user gesture.
+      if (message.prewarm === true && language === "ja" && !entry.prewarmStarted) {
+        entry.prewarmStarted = true;
+        void entry.session.prepare().catch(() => {});
+      }
       return;
     }
     const cached = typeof entry.session.cached === "function" ? entry.session.cached(message.text) : null;

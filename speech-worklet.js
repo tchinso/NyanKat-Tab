@@ -1,5 +1,10 @@
 class NyanKatCapture extends AudioWorkletProcessor {
-  constructor() { super(); this.buffer = new Float32Array(2048); this.offset = 0; }
+  constructor() {
+    super(); this.buffer = new Float32Array(2048); this.offset = 0; this.epoch = -1;
+    this.port.onmessage = ({ data }) => {
+      if (data?.type === 'reset') { this.offset = 0; this.epoch = data.epoch; }
+    };
+  }
   process(inputs) {
     const channels = inputs[0];
     if (!channels?.length) return true;
@@ -8,7 +13,7 @@ class NyanKatCapture extends AudioWorkletProcessor {
       for (const channel of channels) sample += channel[i];
       this.buffer[this.offset++] = sample / channels.length;
       if (this.offset === this.buffer.length) {
-        this.port.postMessage(this.buffer, [this.buffer.buffer]);
+        this.port.postMessage({ audio: this.buffer, epoch: this.epoch }, [this.buffer.buffer]);
         this.buffer = new Float32Array(2048); this.offset = 0;
       }
     }

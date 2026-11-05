@@ -618,3 +618,33 @@ test("configure never races cached results with a delayed model availability che
   assert.equal(h.messages.some(message => message.status?.state === "download-required"), false);
   assert.equal(h.container.children[0].hidden, true);
 });
+
+test("speech prewarms an already available Japanese model without a download gesture", async () => {
+  const h = harness();
+  h.configure("ordinary", "en");
+  h.port.send({ type: "configure", clientId: "speech", sourceLanguage: "ja", prewarm: true });
+  h.port.send({ type: "configure", clientId: "speech", sourceLanguage: "ja", prewarm: true });
+  await settle();
+  assert.equal(h.sessions.find(session => session.language === "en").prepareCalls.length, 0);
+  assert.deepEqual(h.sessions.find(session => session.language === "ja").prepareCalls, [{ inClick: false }]);
+  h.translate("speech", "cue", "こんにちは", "ja");
+  await settle();
+  assert.equal(h.sessions.find(session => session.language === "ja").operations.length, 1);
+});
+
+test("speech prewarm needing a download prompts and a direct click resumes translation", async () => {
+  const h = harness({ downloadable: true });
+  h.port.send({ type: "configure", clientId: "speech", sourceLanguage: "ja", prewarm: true });
+  await settle();
+  const session = h.sessions[0];
+  assert.equal(h.container.children[0].hidden, false);
+  assert.deepEqual(session.prepareCalls, [{ inClick: false }]);
+  h.translate("speech", "cue", "こんにちは", "ja");
+  await settle();
+  h.clickModel("ja");
+  assert.equal(session.prepareCalls.at(-1).allowDownload, true);
+  assert.equal(session.prepareCalls.at(-1).inClick, true);
+  session.downloads[0].resolve();
+  await settle();
+  assert.equal(session.operations.length, 1);
+});
