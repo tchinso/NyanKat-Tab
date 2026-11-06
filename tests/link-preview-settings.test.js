@@ -46,12 +46,12 @@ function harness() {
 
 test("preview settings merge edited fields into the latest imported settings", async () => {
   const h = harness();
-  h.stored.linkPreviewSettings = { enabled: true, longHoverMs: 2300, trigger: "linkDrag" };
+  h.stored.linkPreviewSettings = { enabled: true, longHoverMs: 2300, trigger: "longHover" };
   h.change("longClickMs", 650);
   await h.flush();
   assert.equal(h.stored.linkPreviewSettings.longClickMs, 650);
   assert.equal(h.stored.linkPreviewSettings.longHoverMs, 2300);
-  assert.equal(h.stored.linkPreviewSettings.trigger, "linkDrag");
+  assert.equal(h.stored.linkPreviewSettings.trigger, "longHover");
 });
 
 test("failed preview edits are retained for retry without replacing newer edits", async () => {

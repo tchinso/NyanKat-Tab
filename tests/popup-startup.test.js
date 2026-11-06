@@ -15,17 +15,18 @@ async function loadSubtitleScripts(popup) {
   }
 }
 
-function createPopup() {
+function createPopup({ onlineSearchResponse = { ok: true } } = {}) {
   const scripts = [];
   const events = [];
   const changingEvents = [];
   const pendingLoads = [];
+  const messages = [];
   const elements = new Map();
   for (const id of [
     "status", "openScrollSettings", "openKioDownload",
     "openLinkPreviewSettings", "openDragHoverTranslationSettings",
     "sendZeroOnYouTube", "enableKoneBase64AutoDecode", "disableNewTabFavoritesRedirect",
-    "subtitleStatus", "downloadStatus", "basicTab", "subtitleTab",
+    "subtitleStatus", "downloadStatus", "searchSubtitlesOnline", "basicTab", "subtitleTab",
     "overlaySubtitleTab", "styleSubtitleTab", "extractSubtitleTab",
     "basicPanel", "subtitlePanel", "overlaySubtitlePanel", "styleSubtitlePanel", "downloadPanel"
   ]) {
@@ -84,7 +85,10 @@ function createPopup() {
   };
   const window = { clearTimeout, setTimeout };
   const chrome = {
-    runtime: { getURL: file => "chrome-extension://test/" + file },
+    runtime: {
+      getURL: file => "chrome-extension://test/" + file,
+      async sendMessage({ type }) { messages.push(type); return onlineSearchResponse; }
+    },
     storage: { sync: { get(defaults, callback) { callback(defaults); } } }
   };
   vm.runInNewContext(fs.readFileSync(path.join(root, "popup.js"), "utf8"), {
@@ -100,7 +104,7 @@ function createPopup() {
     script.onload();
     await flush();
   }
-  return { window, scripts, events, changingEvents, pendingLoads, elements, flush, loadNext };
+  return { window, scripts, events, changingEvents, pendingLoads, elements, messages, flush, loadNext };
 }
 
 function assertVisibleView(popup, view) {
@@ -174,6 +178,19 @@ test("opening extraction first prepares subtitle import before loading extractio
   assertVisibleView(popup, "extract");
   assert.equal(popup.scripts.length, subtitleScripts.length + 2);
   assert.deepEqual(popup.events, ["download", "basic", "download"]);
+});
+
+test("online subtitle search requests navigation even while the download scripts are loading", async () => {
+  const popup = createPopup({ onlineSearchResponse: { ok: false } });
+  popup.window.NyanKatPopup.showTab("subtitle", "extract");
+  const button = popup.elements.get("searchSubtitlesOnline");
+  button.emit("click");
+  button.emit("click");
+  assert.deepEqual(popup.messages, ["NYANKAT_SUBTITLE_SEARCH_OPEN"]);
+  assert.equal(button.disabled, true);
+  await popup.flush();
+  assert.equal(button.disabled, false);
+  assert.match(popup.elements.get("downloadStatus").textContent, /다시 시도하세요/);
 });
 
 test("style selection is remembered and the legacy download alias opens extraction", async () => {

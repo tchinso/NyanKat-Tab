@@ -12,7 +12,7 @@ Chrome MV3 extension for:
 - decoding image QR codes locally with bundled ZXing JavaScript 0.23.0 from the image right-click menu; HTTP(S) results open immediately in the current tab, while other content is shown as copyable text. Bare domain names use HTTPS. If the source tab has navigated during decoding, the URL opens in a new tab instead. HTTP(S) and image data URLs are supported (20MB / 32MP limit); inaccessible, blob, and unrecognized images show an error. No additional permissions or runtime CDN code are needed.
 - automatically decoding detected Base64 text on `kone.gg`, with nested decoding, clickable links, copy buttons, and original text reveal
 - showing floating auto-scroll buttons with configurable opacity and site exclusions
-- previewing links in a movable popup after a long click, long hover, or link drag
+- previewing links in a movable popup after a long click or long hover
 - translating dragged text selections into Korean when the drag ends with the browser's Language Detector and Translator APIs
 - downloading detected soft subtitles and searching online under **자막 → 추출·검색**
 - applying local subtitles to videos under **자막 → 오버레이**, with timing offset and playback-rate correction
@@ -43,7 +43,7 @@ Version **1.5.2** reorders the Basic tab actions, starts translation when a text
 
 Version **1.5.1** makes the drag-hover translation panel compact and movable, enables translation when its use button is pressed, prepares detection and the selected translation pair from one button, adds portable JSON settings backup, and translates five upcoming subtitle cues ahead of playback.
 
-Version **1.5.0** adds link previews and on-device selected-text translation. Link previews support three gestures, a five-button toolbar, and an optional outside-click close action. Translation model setup opens inside the active page so model downloads start from a direct click in the extension frame.
+Version **1.5.0** adds link previews and on-device selected-text translation. Link previews have a five-button toolbar and an optional outside-click close action. Translation model setup opens inside the active page so model downloads start from a direct click in the extension frame.
 
 Version **1.3.4** refreshes kio.ac download detection every two seconds and lets each open download-status page request a fresh scan. When the detected `B/s)` count falls from a positive value to zero and stays there for one second, each open status page plays an approximately two-second chime generated with Web Audio. If the browser blocks automatic sound, click **완료음 켜기** on each status page to enable it.
 
@@ -68,7 +68,7 @@ Subtitle probing skips Cloudflare verification documents on `challenges.cloudfla
 
 ## Link preview and selected-text translation
 
-In **기본**, open **링크 미리보기 설정** below the kio.ac download-status button. Choose one activation gesture: long click, long hover, or link drag. Long-click and long-hover delays are saved in 50 ms steps. The preview toolbar groups **고정**, **확대**, **축소**, **최대화**, and **닫기** at the top. The close button is always available; closing by clicking outside is optional. **최대화** fills the page viewport rather than entering browser fullscreen. The popup can also be moved or resized.
+In **기본**, open **링크 미리보기 설정** below the kio.ac download-status button. Choose either long click or long hover to open a preview. Both delays are saved in 50 ms steps. The preview toolbar groups **고정**, **확대**, **축소**, **최대화**, and **닫기** at the top. The close button is always available. Closing by clicking outside is optional. **최대화** fills the page viewport. You can also move or resize the popup.
 
 In **기본**, **드래그 번역 켜기** enables translation and opens a compact setup popup inside the current HTTP(S) web page. Drag its top handle to uncover page content, and scroll inside the popup for the model controls. Choose a source language and click **번역 준비** to prepare both browser models in one action. Selecting text with a mouse drag opens a Korean translation tooltip when the drag ends. If a newly detected language needs a model, the tooltip offers a direct preparation button. Both APIs run in a browser extension frame inside the tab; selected text is not sent to Google Translate. API availability depends on the browser's model and policy state, which the setup popup reports.
 
@@ -110,18 +110,31 @@ file subtitles; applying a subtitle file stops speech recognition for that video
 The extension captures all audio in the selected tab, not an isolated video track.
 Only one tab can be recognized at a time. Pausing clears queued speech; resuming
 restarts segmentation. Seeks discard stale audio and translation results. Closing
-or navigating the target page stops capture. Silero VAD uses a 0.20 speech
-threshold, a 0.2-second minimum unpadded speech span, and a 0.25-second
-speech-end delay, and detects speech in a
-separate worker while Parakeet processes completed segments. Both use local
-single-threaded WASM SIMD; audio is not uploaded. The bounded recognition queue
-discards its oldest waiting segment if it fills and reports the loss in the status.
-Background music and model errors can still affect detection and transcription.
+or navigating the target page stops capture.
+
+At 16 kHz, a single 512-sample Silero frame (32 ms) with a speech probability
+of 0.04 or higher starts a segment. The segmenter keeps 224 ms of audio on
+each side. An isolated onset below 0.08 gets 1.216 seconds of leading audio
+when that audio has not already been sent for recognition. Once a frame reaches
+0.15, a 224 ms pause below 0.045 ends the segment. A segment with only weak
+detections waits 1.856 seconds before ending.
+At the 6-second chunk limit, the segmenter looks back 1.152 seconds for the
+latest completed pause of at least 96 ms below 0.08 and cuts at its midpoint.
+When there is no such pause, it cuts at the limit. The next chunk starts 500 ms
+before the cut. A trailing chunk is emitted only if it extends beyond
+the previous cut. These settings favor quiet voices and short interjections,
+so music and sound effects can also reach recognition.
+
+Silero detects speech in a separate worker while Parakeet processes completed
+segments. Both use local single-threaded WASM SIMD, and audio is not uploaded.
+The bounded recognition queue discards its oldest waiting segment if it fills and
+reports the loss in the status. Model errors can still affect detection and
+transcription.
 Segment collection, inference, and translation introduce delay.
-Speech subtitles are processed in order, with each completed translation shown for
-at least 0.5 seconds before the next one. Up to 24 recognized results can wait;
-if that queue fills, the oldest waiting result is discarded. Rapid dialogue can
-therefore make subtitles lag behind playback.
+Speech subtitles are processed in order. Each final translation or fallback is
+shown for at least 0.9 seconds before the next one. Up to 24 recognized results
+can wait. When the queue fills, the oldest waiting result is discarded. Rapid
+dialogue can therefore make subtitles lag behind playback.
 
 For optional diagnostics, stop recognition, open the extension offscreen
 document's DevTools console, and run

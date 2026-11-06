@@ -31,7 +31,7 @@ function normalize(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
     enabled: source.enabled !== false,
-    trigger: ["longClick", "longHover", "linkDrag"].includes(source.trigger) ? source.trigger : DEFAULTS.trigger,
+    trigger: ["longClick", "longHover"].includes(source.trigger) ? source.trigger : DEFAULTS.trigger,
     longClickMs: normalizeTime(source.longClickMs, DEFAULTS.longClickMs),
     longHoverMs: normalizeTime(source.longHoverMs, DEFAULTS.longHoverMs),
     closeOnOutsideClick: source.closeOnOutsideClick === true

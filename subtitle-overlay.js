@@ -1202,7 +1202,7 @@
   }
 
   const SPEECH_QUEUE_LIMIT = 24;
-  const SPEECH_HOLD_MS = 500;
+  const SPEECH_HOLD_MS = 900;
   const SPEECH_TIMEOUT_MS = 12000;
 
   function armSpeechTimeout(record, active) {
@@ -1272,8 +1272,8 @@
       active.expired = true;
       advanceSpeech(record);
     }, SPEECH_TIMEOUT_MS);
-    // The final translation (or fallback) is kept for 500 ms after completion,
-    // even when streaming partials were displayed much earlier.
+    // Start the hold when the final translation or fallback is ready, even
+    // when streaming partials were displayed much earlier.
     record.speechHoldTimer = setTimeout(() => {
       if (record.speechActive !== active) return;
       active.canAdvance = true;

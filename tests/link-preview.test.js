@@ -130,15 +130,15 @@ test("long hover does not arm while dragging across a link", () => {
   assert.equal(h.requests.length, 1);
 });
 
-test("native pointer cancellation after dragstart does not cancel a link drag preview", () => {
+test("native link dragging opens no preview with a retired trigger", () => {
   const h = harness("linkDrag");
+  h.emit("pointerdown", { buttons: 1 });
   h.emit("dragstart");
-  h.emit("pointercancel");
   h.emit("drag");
-  assert.equal(h.requests.length, 1);
-  h.emit("drag");
-  assert.equal(h.requests.length, 1, "one preview opens per drag");
-  h.emit("dragend");
-  h.emit("drag");
+  h.advance(500);
+  assert.equal(h.requests.length, 0);
+
+  h.emit("pointerdown", { buttons: 1 });
+  h.advance(400);
   assert.equal(h.requests.length, 1);
 });

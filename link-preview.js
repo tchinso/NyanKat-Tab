@@ -29,9 +29,6 @@
   let pendingLink = null;
   let suppressClickLink = null;
   let suppressClickUntil = 0;
-  let dragLink = null;
-  let dragOpened = false;
-  let lastPointer = { x: 0, y: 0 };
 
   function normalizedTime(value, fallback) {
     const number = Number(value);
@@ -44,7 +41,7 @@
     const source = value && typeof value === "object" ? value : {};
     return {
       enabled: source.enabled !== false,
-      trigger: ["longClick", "longHover", "linkDrag"].includes(source.trigger) ? source.trigger : DEFAULTS.trigger,
+      trigger: ["longClick", "longHover"].includes(source.trigger) ? source.trigger : DEFAULTS.trigger,
       longClickMs: normalizedTime(source.longClickMs, DEFAULTS.longClickMs),
       longHoverMs: normalizedTime(source.longHoverMs, DEFAULTS.longHoverMs),
       closeOnOutsideClick: source.closeOnOutsideClick === true
@@ -291,7 +288,6 @@
   }
 
   function onPointerMove(event) {
-    lastPointer = { x: event.clientX, y: event.clientY };
     if (pendingLink && settings.trigger === "longClick") {
       const rect = pendingLink.getBoundingClientRect();
       if (event.clientX < rect.left - 8 || event.clientX > rect.right + 8 ||
@@ -320,26 +316,6 @@
     if (event.composedPath().includes(pendingLink) && !pendingLink.contains(event.relatedTarget)) clearGesture();
   }
 
-  function onDragStart(event) {
-    if (!event.isTrusted) return;
-    clearGesture();
-    if (!settings.enabled || settings.trigger !== "linkDrag") return;
-    const link = linkFromEvent(event);
-    dragLink = validLink(link) ? link : null;
-    dragOpened = false;
-  }
-
-  function onDrag(event) {
-    if (!event.isTrusted) return;
-    if (!dragLink || dragOpened || !settings.enabled || settings.trigger !== "linkDrag") return;
-    const url = validLink(dragLink);
-    if (!url) return;
-    dragOpened = true;
-    const x = event.clientX || lastPointer.x;
-    const y = event.clientY || lastPointer.y;
-    openPreview(url, x, y);
-  }
-
   document.addEventListener("pointerdown", onPointerDown, true);
   document.addEventListener("pointermove", onPointerMove, true);
   document.addEventListener("pointerup", () => {
@@ -352,7 +328,7 @@
     suppressClickUntil = 0;
   }
   document.addEventListener("pointercancel", cancelPointerGesture, true);
-  window.addEventListener("blur", () => { cancelPointerGesture(); dragLink = null; });
+  window.addEventListener("blur", cancelPointerGesture);
   document.addEventListener("pointerover", onPointerOver, true);
   document.addEventListener("pointerout", onPointerOut, true);
   document.addEventListener("wheel", clearGesture, true);
@@ -364,10 +340,9 @@
     }
     suppressClickLink = null;
   }, true);
-  document.addEventListener("dragstart", onDragStart, true);
-  document.addEventListener("drag", onDrag, true);
-  document.addEventListener("dragend", () => { dragLink = null; }, true);
-  document.addEventListener("drop", () => { dragLink = null; }, true);
+  document.addEventListener("dragstart", (event) => {
+    if (event.isTrusted) clearGesture();
+  }, true);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) clearGesture();
   });

@@ -196,6 +196,17 @@ openLinkPreviewSettingsButton.addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("link-preview-settings.html") });
 });
 
+const searchSubtitlesOnlineButton = document.querySelector("#searchSubtitlesOnline");
+searchSubtitlesOnlineButton.addEventListener("click", async () => {
+  if (searchSubtitlesOnlineButton.disabled) return;
+  searchSubtitlesOnlineButton.disabled = true;
+  const response = await chrome.runtime.sendMessage({ type: "NYANKAT_SUBTITLE_SEARCH_OPEN" }).catch(() => null);
+  if (!response?.ok) {
+    document.querySelector("#downloadStatus").textContent = "온라인 자막 검색을 열지 못했습니다. 다시 시도하세요.";
+  }
+  searchSubtitlesOnlineButton.disabled = false;
+});
+
 openDragHoverTranslationSettingsButton.addEventListener("click", () => {
   // Pressing "use" is consent to turn translation on, including on tabs
   // where the compact settings panel cannot be displayed.

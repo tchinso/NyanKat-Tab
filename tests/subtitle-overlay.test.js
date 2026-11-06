@@ -217,7 +217,7 @@ async function speechQueueHarness() {
   return { ...h, send, port, requests: () => port.messages.filter(message => message.type === 'translate') };
 }
 
-test('speech translation is FIFO and the completed streaming result stays visible for 500 ms', async () => {
+test('speech translation is FIFO and the completed streaming result stays visible for 900 ms', async () => {
   const h = await speechQueueHarness();
   h.send('text', 'one'); h.send('text', 'two'); h.send('text', 'three');
   assert.deepEqual(h.requests().map(request => request.text), ['one']);
@@ -230,14 +230,14 @@ test('speech translation is FIFO and the completed streaming result stays visibl
   assert.equal(h.requests().length, 1, 'regular streaming progress extends the 12-second stall timeout');
   assert.equal(h.port.messages.some(message => message.type === 'cancel' && message.requestId === first.requestId), false);
   h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '첫 문장' });
-  h.advance(499);
+  h.advance(899);
   assert.equal(h.layer('fill').textContent, '첫 문장');
   assert.equal(h.requests().length, 1);
   h.advance(1);
   assert.deepEqual(h.requests().map(request => request.text), ['one', 'two']);
   const second = h.requests()[1];
   h.port.onMessage.emit({ type: 'done', requestId: second.requestId, text: '둘째' });
-  h.advance(500);
+  h.advance(900);
   assert.deepEqual(h.requests().map(request => request.text), ['one', 'two', 'three']);
 });
 
@@ -247,7 +247,7 @@ test('speech translation queue drops only its oldest waiting item when it exceed
   assert.deepEqual(h.requests().map(request => request.text), ['line 0']);
   const first = h.requests()[0];
   h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '첫째' });
-  h.advance(500);
+  h.advance(900);
   assert.deepEqual(h.requests().map(request => request.text), ['line 0', 'line 3']);
 });
 
@@ -333,7 +333,7 @@ test('failed speech translation and a 12-second wait both fall back and advance'
   const first = h.requests()[0];
   h.port.onMessage.emit({ type: 'error', requestId: first.requestId, reason: 'failed' });
   assert.equal(h.layer('fill').textContent, 'first');
-  h.advance(499);
+  h.advance(899);
   assert.equal(h.requests().length, 1);
   h.advance(1);
   assert.equal(h.requests()[1].text, 'second');
@@ -341,7 +341,7 @@ test('failed speech translation and a 12-second wait both fall back and advance'
   assert.equal(h.requests().length, 2);
   h.advance(1);
   assert.equal(h.layer('fill').textContent, 'second');
-  h.advance(500);
+  h.advance(900);
   assert.equal(h.requests()[2].text, 'third');
 });
 
@@ -357,12 +357,12 @@ test('glossary changes restart unfinished speech without losing queued subtitles
   assert.equal(retried.text, 'current');
   h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: 'stale' });
   nextPort.onMessage.emit({ type: 'done', requestId: retried.requestId, text: '현재' });
-  h.advance(500);
+  h.advance(900);
   for (let i = 0; i < 24; i++) {
     const request = nextPort.messages.filter(message => message.type === 'translate').at(-1);
     assert.equal(request.text, `queued ${i}`);
     nextPort.onMessage.emit({ type: 'done', requestId: request.requestId, text: `번역 ${i}` });
-    h.advance(500);
+    h.advance(900);
   }
   assert.equal(nextPort.messages.filter(message => message.type === 'translate').length, 25);
 });
@@ -372,10 +372,10 @@ test('glossary changes do not interrupt the completed speech caption hold', asyn
   h.send('text', 'current'); h.send('text', 'next');
   const first = h.requests()[0];
   h.port.onMessage.emit({ type: 'done', requestId: first.requestId, text: '현재' });
-  h.advance(250);
+  h.advance(450);
   h.chrome.storage.onChanged.emit({ subtitleSourceGlossary: { newValue: 'a=b' } }, 'local');
   assert.equal(h.layer('fill').textContent, '현재');
-  h.advance(249);
+  h.advance(449);
   assert.equal(h.layer('fill').textContent, '현재');
   h.advance(1);
   const nextPort = h.translationPorts.at(-1);

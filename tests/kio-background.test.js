@@ -16,11 +16,13 @@ function event() {
   };
 }
 
-function harness() {
+function harness(now = Date.now()) {
   const pendingReads = [];
   const scanRequests = [];
   const tabUpdates = [];
+  const openedUrls = [];
   const stored = {};
+  const local = {};
   let readCount = 0;
   const session = {
     get(_key, callback) {
@@ -36,10 +38,14 @@ function harness() {
       id: "extension", getURL: part => "chrome-extension://extension/" + part,
       onMessage: event(), onInstalled: event(), onStartup: event(), onConnect: event()
     },
-    storage: { session, sync },
+    storage: { session, sync, local: {
+      async get(key) { return Object.hasOwn(local, key) ? { [key]: local[key] } : {}; },
+      async set(values) { Object.assign(local, values); }
+    } },
     contextMenus: { onClicked: event(), removeAll(callback) { callback(); }, create() {} },
     tabs: {
       onRemoved: event(),
+      async create({ url }) { openedUrls.push(url); return { id: openedUrls.length }; },
       sendMessage(tabId, message, options, callback) {
         scanRequests.push({ tabId, message, options });
         callback({ ok: true });
@@ -58,6 +64,7 @@ function harness() {
   };
   const context = vm.createContext({
     chrome, URL, TextDecoder, TextEncoder, AbortController, AbortSignal, setTimeout, clearTimeout,
+    Date: class extends Date { static now() { return now; } },
     atob: value => Buffer.from(value, "base64").toString("binary"),
     btoa: value => Buffer.from(value, "binary").toString("base64"),
     importScripts(...filenames) {
@@ -85,7 +92,8 @@ function harness() {
   }
 
   return {
-    chrome, dispatch, connect, pendingReads, scanRequests, tabUpdates, stored,
+    chrome, dispatch, connect, pendingReads, scanRequests, tabUpdates, openedUrls, stored, local,
+    setNow(time) { now = time; },
     get readCount() { return readCount; }
   };
 }
@@ -159,4 +167,50 @@ test("a disconnected status page cannot block updates to other open pages", asyn
 
   assert.equal(healthy.at(-1).entries[0].matchCount, 1);
   assert.equal(disconnected.length, 1, "failed ports are not sent another update");
+});
+
+const VERIFY_URL = "https://verify.h2h.workers.dev/";
+const SEARCH_URL = "https://sub.h2h.workers.dev/";
+
+function openSubtitleSearch(h) {
+  const { runtime } = h.chrome;
+  return h.dispatch({ type: "NYANKAT_SUBTITLE_SEARCH_OPEN" }, {
+    id: runtime.id, url: runtime.getURL("popup.html")
+  });
+}
+
+test("online subtitle search reopens verification at the ten-month anniversary", async () => {
+  const firstVisit = Date.UTC(2026, 0, 31, 14);
+  const expiration = Date.UTC(2026, 10, 30, 14);
+  const h = harness(firstVisit);
+  const responses = await Promise.all([openSubtitleSearch(h), openSubtitleSearch(h)]);
+  assert.ok(responses.every(response => response.ok));
+  assert.deepEqual(h.openedUrls, [VERIFY_URL, SEARCH_URL]);
+  assert.equal(h.local.subtitleSearchVerificationOpenedAt, firstVisit);
+
+  h.setNow(expiration - 1);
+  assert.equal((await openSubtitleSearch(h)).ok, true);
+  assert.equal(h.openedUrls.at(-1), SEARCH_URL);
+  assert.equal(h.local.subtitleSearchVerificationOpenedAt, firstVisit);
+
+  h.setNow(expiration);
+  assert.equal((await openSubtitleSearch(h)).ok, true);
+  assert.equal(h.openedUrls.at(-1), VERIFY_URL);
+  assert.equal(h.local.subtitleSearchVerificationOpenedAt, expiration);
+  assert.equal((await openSubtitleSearch(h)).ok, true);
+  assert.equal(h.openedUrls.at(-1), SEARCH_URL);
+});
+
+test("a failed verification tab opening leaves the next search eligible for verification", async () => {
+  const now = Date.UTC(2026, 10, 6);
+  const h = harness(now);
+  const createTab = h.chrome.tabs.create;
+  h.chrome.tabs.create = async () => { throw new Error("Tab could not be opened"); };
+  assert.equal((await openSubtitleSearch(h)).ok, false);
+  assert.equal(h.local.subtitleSearchVerificationOpenedAt, undefined);
+
+  h.chrome.tabs.create = createTab;
+  assert.equal((await openSubtitleSearch(h)).ok, true);
+  assert.deepEqual(h.openedUrls, [VERIFY_URL]);
+  assert.equal(h.local.subtitleSearchVerificationOpenedAt, now);
 });

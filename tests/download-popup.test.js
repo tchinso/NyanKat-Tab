@@ -344,7 +344,7 @@ test("full-dialogue classification sorts same-language tracks while preserving s
 
 test("only the dedicated online subtitle search remains", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "popup.html"), "utf8");
-  assert.match(html, /href="https:\/\/sub.h2h.workers.dev\/"/);
+  assert.match(html, /<button\b[^>]*id="searchSubtitlesOnline"[^>]*type="button">온라인 자막 검색<\/button>/);
   assert.doesNotMatch(html, /subtitleSearchQuery|subtitleSearchGoogle|subtitleSearchNaver/);
 });
 

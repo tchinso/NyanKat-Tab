@@ -114,7 +114,7 @@ test("settings panel is 300 by 220 pixels and can be moved within the viewport",
 
 test("using drag translation enables it before opening its settings", async () => {
   const controls = new Map();
-  for (const id of ["#sendZeroOnYouTube", "#enableKoneBase64AutoDecode", "#disableNewTabFavoritesRedirect", "#status", "#openScrollSettings", "#openScrollPositionMode", "#openKioDownload", "#openLinkPreviewSettings", "#openDragHoverTranslationSettings"]) controls.set(id, element(id));
+  for (const id of ["#sendZeroOnYouTube", "#enableKoneBase64AutoDecode", "#disableNewTabFavoritesRedirect", "#status", "#openScrollSettings", "#openScrollPositionMode", "#openKioDownload", "#openLinkPreviewSettings", "#openDragHoverTranslationSettings", "#searchSubtitlesOnline"]) controls.set(id, element(id));
   const steps = [];
   const document = {
     querySelector(id) { return controls.get(id); },
@@ -148,7 +148,7 @@ test("using drag translation enables it before opening its settings", async () =
 
 test("a failed popup setting save restores the checkbox and leaves an error status", () => {
   const controls = new Map();
-  for (const id of ["#sendZeroOnYouTube", "#enableKoneBase64AutoDecode", "#disableNewTabFavoritesRedirect", "#status", "#openScrollSettings", "#openScrollPositionMode", "#openKioDownload", "#openLinkPreviewSettings", "#openDragHoverTranslationSettings"]) controls.set(id, element(id));
+  for (const id of ["#sendZeroOnYouTube", "#enableKoneBase64AutoDecode", "#disableNewTabFavoritesRedirect", "#status", "#openScrollSettings", "#openScrollPositionMode", "#openKioDownload", "#openLinkPreviewSettings", "#openDragHoverTranslationSettings", "#searchSubtitlesOnline"]) controls.set(id, element(id));
   const document = {
     querySelector(id) { return controls.get(id); },
     querySelectorAll() { return []; },

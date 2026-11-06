@@ -500,6 +500,29 @@ function loadSubtitleRemoteFont(font) {
   return subtitleFontRequests.get(font);
 }
 
+const subtitleSearchVerificationKey = "subtitleSearchVerificationOpenedAt";
+let subtitleSearchQueue = Promise.resolve();
+
+function subtitleSearchVerificationExpiresAt(openedAt) {
+  const expires = new Date(openedAt);
+  const day = expires.getUTCDate();
+  // Day zero of the following month clamps dates such as January 31 to November 30.
+  expires.setUTCMonth(expires.getUTCMonth() + 11, 0);
+  expires.setUTCDate(Math.min(day, expires.getUTCDate()));
+  return expires.getTime();
+}
+
+async function openOnlineSubtitleSearch() {
+  const { [subtitleSearchVerificationKey]: openedAt } = await chrome.storage.local.get(subtitleSearchVerificationKey);
+  const now = Date.now();
+  const needsVerification = !Number.isFinite(openedAt) || openedAt <= 0 || openedAt > now ||
+    now >= subtitleSearchVerificationExpiresAt(openedAt);
+  await chrome.tabs.create({ url: needsVerification ? "https://verify.h2h.workers.dev/" : "https://sub.h2h.workers.dev/" });
+  if (needsVerification) {
+    await chrome.storage.local.set({ [subtitleSearchVerificationKey]: Date.now() });
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {
     return;
@@ -510,6 +533,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (b64) => sendResponse({ ok: true, b64 }),
       () => sendResponse({ ok: false })
     );
+    return true;
+  }
+
+  if (message.type === "NYANKAT_SUBTITLE_SEARCH_OPEN" &&
+    sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup.html")) {
+    // The popup can close when the new tab becomes active.
+    const request = subtitleSearchQueue.catch(() => {}).then(openOnlineSubtitleSearch);
+    subtitleSearchQueue = request;
+    void request.then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
     return true;
   }
 

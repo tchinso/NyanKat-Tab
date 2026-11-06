@@ -57,18 +57,24 @@ test("popup exposes JSON export and import controls", () => {
   assert.match(html, /<script src="settings-transfer\.js"><\/script>/);
 });
 
-test("source glossary and display options travel in backups without translation cache", async () => {
+test("source glossary and display options travel in backups without local subtitle history", async () => {
   const display = { showOriginal: true, hideSoundEffects: false, hideSpeakers: true };
+  const sourceVisit = Date.UTC(2026, 10, 6);
   const h = harness({}, { subtitleSourceGlossary: "桜=사쿠라", subtitleDisplayOptions: display,
+    subtitleSearchVerificationOpenedAt: sourceVisit,
     subtitleTranslationCache: { entries: [["hash", "private translated text"]] } });
   const exported = await h.transfer.buildExport();
   assert.equal(exported.local.subtitleSourceGlossary, "桜=사쿠라");
   assert.deepEqual(plain(exported.local.subtitleDisplayOptions), display);
   assert.equal(exported.local.subtitleTranslationCache, undefined);
-  const receiving = harness();
+  assert.equal(exported.local.subtitleSearchVerificationOpenedAt, undefined);
+  exported.local.subtitleSearchVerificationOpenedAt = sourceVisit;
+  const destinationVisit = Date.UTC(2026, 9, 2);
+  const receiving = harness({}, { subtitleSearchVerificationOpenedAt: destinationVisit });
   await receiving.transfer.applyImport(receiving.transfer.parseImport(JSON.stringify(exported)));
   assert.deepEqual(receiving.local.subtitleDisplayOptions, display);
   assert.equal(receiving.local.subtitleSourceGlossary, "桜=사쿠라");
+  assert.equal(receiving.local.subtitleSearchVerificationOpenedAt, destinationVisit);
   exported.local.subtitleDisplayOptions.showOriginal = "true";
   assert.throws(() => receiving.transfer.parseImport(JSON.stringify(exported)), /올바르지/);
 });
@@ -78,7 +84,7 @@ test("export includes all persistent settings and omits a PC-installed subtitle 
     enableDragHoverTranslation: true,
     floatingScrollSettings: { enabled: false, downSpeed: 3, fastDownSpeed: 30, buttonSize: 80, opacity: 0.4, position: { x: 0.2, y: 0.7 } },
     floatingScrollDisabledSites: ["example.com"],
-    linkPreviewSettings: { enabled: true, trigger: "linkDrag", longClickMs: 450, longHoverMs: 1250, closeOnOutsideClick: true }
+    linkPreviewSettings: { enabled: true, trigger: "longHover", longClickMs: 450, longHoverMs: 1250, closeOnOutsideClick: true }
   }, {
     subtitleStyle: { ...harnessStyle(), font: '"My Installed Font"', fontSize: 62, color: "#123456" },
     subtitleFont: '"My Installed Font"',
@@ -92,7 +98,7 @@ test("export includes all persistent settings and omits a PC-installed subtitle 
     "floatingScrollDisabledSites", "floatingScrollSettings", "linkPreviewSettings", "sendZeroOnYouTube"
   ].sort());
   assert.equal(exported.sync.enableDragHoverTranslation, true);
-  assert.equal(exported.sync.linkPreviewSettings.trigger, "linkDrag");
+  assert.equal(exported.sync.linkPreviewSettings.trigger, "longHover");
   assert.equal(exported.local.subtitleStyle.font, undefined);
   assert.equal(exported.local.subtitleStyle.fontSize, 62);
   assert.equal(exported.local.subtitlePostprocessDictionary, "hello=안녕하세요");
@@ -100,6 +106,19 @@ test("export includes all persistent settings and omits a PC-installed subtitle 
   assert.deepEqual(exported.local.subtitleStylePresets, []);
   assert.equal(exported.local.subtitleStylePresetId, "");
   assert.deepEqual(plain(h.transfer.parseImport(JSON.stringify(exported))).sync, exported.sync);
+});
+
+test("settings transfers use the default when a preview trigger is unsupported", async () => {
+  const stored = { enabled: false, trigger: "linkDrag", longClickMs: 450, longHoverMs: 1250, closeOnOutsideClick: true };
+  const h = harness({ linkPreviewSettings: stored });
+  const file = await h.transfer.buildExport();
+  const expected = { ...stored, trigger: "longClick" };
+  assert.deepEqual(plain(file.sync.linkPreviewSettings), expected);
+  assert.equal(h.sync.linkPreviewSettings.trigger, "linkDrag");
+
+  file.sync.linkPreviewSettings = stored;
+  const imported = h.transfer.parseImport(JSON.stringify(file));
+  assert.deepEqual(plain(imported.sync.linkPreviewSettings), expected);
 });
 
 function harnessStyle() {

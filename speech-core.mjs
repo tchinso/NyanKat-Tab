@@ -22,14 +22,26 @@ export function decodeCTC(logits, tokens) {
 
 // Frames are contiguous 512-sample, mono 16 kHz PCM. The VAD model runs in
 // the worker; this class only tracks its probabilities and retains audio views.
-const MIN_SPEECH_SAMPLES = 3200; // 0.2 seconds at 16 kHz
-const END_SILENCE_SAMPLES = 4000; // 0.25 seconds at 16 kHz
+const SPEECH_THRESHOLD = 0.04;
+const RELEASE_THRESHOLD = 0.045;
+const WEAK_SPEECH_THRESHOLD = 0.08;
+const CLEAR_SPEECH_THRESHOLD = 0.15;
+const MIN_SPEECH_SAMPLES = 512;
+const END_SILENCE_SAMPLES = 3584;
+const WEAK_END_SILENCE_SAMPLES = 29696;
+const PRE_PADDING_SAMPLES = 3584;
+const WEAK_PRE_PADDING_SAMPLES = 19456;
+const POST_PADDING_SAMPLES = 3584;
+const MAX_CHUNK_SAMPLES = 96000;
+const CUT_LOOKBACK_SAMPLES = 18432;
+const CUT_PAUSE_SAMPLES = 1536;
+const OVERLAP_SAMPLES = 8000;
 export class Segmenter {
   constructor(emit) { this.emit = emit; this.reset(); }
   reset() {
     this.frames = []; this.position = 0; this.start = null;
-    this.speechStart = 0; this.lastSpeechEnd = 0; this.speechSamples = 0;
-    this.previousCut = 0; this.overlap = false;
+    this.lastSpeechEnd = 0; this.speechSamples = 0; this.previousCut = 0; this.hasClearSpeech = false;
+    this.lastReleaseEnd = 0; this.lastOutputEnd = 0;
   }
   trim(before) {
     while (this.frames.length && this.frames[0].end <= before) this.frames.shift();
@@ -40,40 +52,58 @@ export class Segmenter {
       const from = Math.max(start, frame.start), to = Math.min(end, frame.end);
       if (to > from) audio.set(frame.samples.subarray(from - frame.start, to - frame.start), from - start);
     }
-    this.emit(audio, { overlap: this.overlap, forced, speechSamples: this.speechSamples, endSample: end,
+    this.lastOutputEnd = end;
+    this.emit(audio, { overlap: this.previousCut > 0, forced, speechSamples: this.speechSamples, endSample: end,
       speechEndSample: Math.min(end, this.lastSpeechEnd), finalizedSample: this.position });
+  }
+  cutNearPause(limit) {
+    let cut = limit, pauseStart = null;
+    for (const frame of this.frames) {
+      if (frame.start < limit - CUT_LOOKBACK_SAMPLES) continue;
+      if (frame.start > limit) break;
+      if (frame.weak) {
+        pauseStart ??= frame.start;
+      } else if (pauseStart !== null) {
+        if (frame.start - pauseStart >= CUT_PAUSE_SAMPLES) cut = (pauseStart + frame.start) / 2;
+        pauseStart = null;
+      }
+    }
+    return cut;
   }
   push(samples, probability) {
     if (samples.length !== 512) throw Error('VAD frame must contain 512 samples');
     const frameStart = this.position;
     this.position += samples.length;
-    this.frames.push({ samples, start: frameStart, end: this.position });
-    const speech = probability >= 0.20;
+    const weak = probability < WEAK_SPEECH_THRESHOLD;
+    this.frames.push({ samples, start: frameStart, end: this.position, weak });
+    const speech = probability >= SPEECH_THRESHOLD;
     if (speech) {
       if (this.start === null) {
-        this.start = Math.max(0, frameStart - 800);
-        this.speechStart = frameStart;
-        this.speechSamples = 0; this.previousCut = 0; this.overlap = false;
+        const isolated = frameStart - this.lastOutputEnd >= WEAK_PRE_PADDING_SAMPLES;
+        const prePadding = weak && isolated ? WEAK_PRE_PADDING_SAMPLES : PRE_PADDING_SAMPLES;
+        this.start = Math.max(0, frameStart - prePadding);
       }
+      this.hasClearSpeech ||= probability >= CLEAR_SPEECH_THRESHOLD;
       this.lastSpeechEnd = this.position;
+      if (probability >= RELEASE_THRESHOLD) this.lastReleaseEnd = this.position;
       this.speechSamples += samples.length;
     }
-    if (this.start !== null) {
-      // The end delay also covers the 100 ms post- and 50 ms pre-padding
-      // overlap window. Frames quantize the effective delay to 256 ms.
-      if (!speech && this.position - this.lastSpeechEnd >= END_SILENCE_SAMPLES) {
-        if (this.lastSpeechEnd - this.speechStart >= MIN_SPEECH_SAMPLES && (this.previousCut === 0 || this.lastSpeechEnd + 1600 > this.previousCut)) {
-          this.output(this.start, Math.min(this.position, this.lastSpeechEnd + 1600), false);
-        }
-        this.start = null; this.speechSamples = 0; this.overlap = false;
-      } else if (this.lastSpeechEnd - this.speechStart >= MIN_SPEECH_SAMPLES && this.position - this.start >= 80000) {
-        const cut = this.start + 80000;
+    if (this.start !== null && this.speechSamples >= MIN_SPEECH_SAMPLES) {
+      // Weak onsets may contain only a few detected syllables. Give them time
+      // to join the rest of the phrase before using the normal pause length.
+      const endSilence = this.hasClearSpeech ? END_SILENCE_SAMPLES : WEAK_END_SILENCE_SAMPLES;
+      const lastActiveEnd = this.hasClearSpeech ? this.lastReleaseEnd : this.lastSpeechEnd;
+      if (this.position - lastActiveEnd >= endSilence) {
+        const end = Math.min(this.position, this.lastSpeechEnd + POST_PADDING_SAMPLES);
+        if (end > this.previousCut) this.output(this.start, end, false);
+        this.start = null; this.speechSamples = 0; this.previousCut = 0; this.hasClearSpeech = false;
+      } else if (this.position - this.start >= MAX_CHUNK_SAMPLES) {
+        const cut = this.cutNearPause(this.start + MAX_CHUNK_SAMPLES);
         this.output(this.start, cut, true);
-        this.start = cut - 4000;
+        this.start = cut - OVERLAP_SAMPLES;
         this.previousCut = cut;
-        this.overlap = true;
       }
     }
-    this.trim(this.start === null ? this.position - 800 : this.start);
+    this.trim(this.start === null ? this.position - WEAK_PRE_PADDING_SAMPLES : this.start);
   }
 }

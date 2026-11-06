@@ -99,8 +99,8 @@
       if (own(input, key)) result[key] = checkBoolean(input[key], key);
     }
     if (own(input, "trigger")) {
-      if (!["longClick", "longHover", "linkDrag"].includes(input.trigger)) invalid("링크 미리보기 동작");
-      result.trigger = input.trigger;
+      if (typeof input.trigger !== "string") invalid("링크 미리보기 동작");
+      if (["longClick", "longHover"].includes(input.trigger)) result.trigger = input.trigger;
     }
     for (const key of ["longClickMs", "longHoverMs"]) {
       if (own(input, key)) result[key] = checkNumber(input[key], 50, 5000, key);
